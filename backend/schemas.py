@@ -1,0 +1,461 @@
+from pydantic import BaseModel, field_validator, field_serializer
+from typing import Optional, List
+from datetime import datetime, timezone
+from enum import Enum
+
+
+def _utc_iso(v: datetime) -> str:
+    """Datetime-г ISO 8601 форматаар буцаана."""
+    if v is None:
+        return None
+    return v.strftime('%Y-%m-%dT%H:%M:%S+08:00')
+
+
+# ── Enums ──────────────────────────────────────────────
+class OrderStatus(str, Enum):
+    PENDING    = "pending"
+    PROCESSING = "processing"
+    WASHING    = "washing"      # backward compat
+    IRONING    = "ironing"      # backward compat
+    READY      = "ready"
+    DELIVERED  = "delivered"
+
+class PaymentMethod(str, Enum):
+    CASH       = "cash"
+    CARD       = "card"
+    TRANSFER   = "transfer"
+    POINTS     = "points"
+    MIXED      = "mixed"
+    UNPAID     = "unpaid"
+
+class DiscountType(str, Enum):
+    PERCENT = "percent"
+    AMOUNT  = "amount"
+
+
+# ── Customer ───────────────────────────────────────────
+class CustomerCreate(BaseModel):
+    name:  str
+    phone: str
+    email: Optional[str] = None
+
+class CustomerUpdate(BaseModel):
+    name:  Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+
+class CustomerOut(BaseModel):
+    id:            int
+    name:          str
+    phone:         str
+    email:         Optional[str]
+    points:        int
+    total_spent:   float
+    created_at:    datetime
+    warning_count: int = 0    # Анхааруулгатай захиалгын тоо (computed)
+    warning_total: float = 0  # Анхааруулгатай төлөгдөөгүй дүн (computed)
+
+    @field_serializer('created_at')
+    def _ser_created_at(self, v): return _utc_iso(v)
+
+    class Config:
+        from_attributes = True
+
+
+# ── Category ───────────────────────────────────────────
+class CategoryCreate(BaseModel):
+    value:        str
+    label:        str
+    color:        str = "from-gray-400 to-gray-600"
+    badge_color:  str = "bg-gray-100 text-gray-600"
+    sort_order:   int = 0
+    machine_type: Optional[str] = None   # washer / dryer / shoe_washer
+
+class CategoryUpdate(BaseModel):
+    label:        Optional[str] = None
+    color:        Optional[str] = None
+    badge_color:  Optional[str] = None
+    sort_order:   Optional[int] = None
+    machine_type: Optional[str] = None
+
+class CategoryOut(BaseModel):
+    id:           int
+    value:        str
+    label:        str
+    color:        str
+    badge_color:  str
+    sort_order:   int
+    machine_type: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
+# ── Service ────────────────────────────────────────────
+class ServiceCreate(BaseModel):
+    code:         str
+    name:         str
+    name_en:      Optional[str] = None
+    price:        float
+    unit:         str = "ширхэг"
+    category:     str = "general"
+    duration_min: int = 60
+    points_earn:  int = 1
+    image_url:    Optional[str] = None
+    machine_ids:  List[int] = []
+
+class ServiceUpdate(BaseModel):
+    name:         Optional[str]   = None
+    price:        Optional[float] = None
+    unit:         Optional[str]   = None
+    category:     Optional[str]   = None
+    duration_min: Optional[int]   = None
+    is_active:    Optional[bool]  = None
+    machine_ids:  Optional[List[int]] = None
+
+class ServiceOut(BaseModel):
+    id:           int
+    code:         str
+    name:         str
+    name_en:      Optional[str]
+    price:        float
+    unit:         str
+    category:     str
+    duration_min: int
+    points_earn:  int
+    is_active:    bool
+    image_url:    Optional[str]
+    machine_ids:  List[int] = []
+
+    class Config:
+        from_attributes = True
+
+
+# ── Inventory Brief (used inside OrderItemOut) ─────────
+class InventoryBriefOut(BaseModel):
+    id:         int
+    name:       str
+    unit:       str
+    sale_price: float
+
+    class Config:
+        from_attributes = True
+
+
+# ── Order Item ─────────────────────────────────────────
+class OrderItemCreate(BaseModel):
+    service_id:  Optional[int] = None   # үйлчилгээний захиалга
+    product_id:  Optional[int] = None   # бараа зарах
+    quantity:    int = 1
+    notes:       Optional[str] = None
+
+class OrderItemOut(BaseModel):
+    id:          int
+    service_id:  Optional[int]
+    product_id:  Optional[int]
+    item_type:   str = "service"
+    item_name:   Optional[str]
+    quantity:    int
+    unit_price:  float
+    total_price: float
+    notes:       Optional[str]
+    service:     Optional[ServiceOut]
+    product:     Optional[InventoryBriefOut]
+
+    class Config:
+        from_attributes = True
+
+
+# ── Order ──────────────────────────────────────────────
+class OrderCreate(BaseModel):
+    customer_id:     Optional[int]        = None
+    phone:           Optional[str]        = None   # SMS явуулах дугаар (харилцагчгүй захиалгад)
+    items:           List[OrderItemCreate]
+    discount_type:   Optional[DiscountType] = None
+    discount_value:  Optional[float]      = 0.0
+    payment_method:  PaymentMethod        = PaymentMethod.CASH
+    payment_details: Optional[str]        = None   # JSON for mixed: '{"cash":10000,"transfer":20000}'
+    points_used:     int                  = 0
+    notes:           Optional[str]        = None
+    cashier_name:    str                  = "Кассчин"
+
+class OrderStatusUpdate(BaseModel):
+    status: OrderStatus
+
+class OrderPayRequest(BaseModel):
+    payment_method:  PaymentMethod
+    payment_details: Optional[str] = None
+    points_used:     int = 0
+
+class OrderFlagRequest(BaseModel):
+    """Анхааруулгын жагсаалтад нэмэх (төлбөр төлөлгүй явсан)"""
+    reason: Optional[str] = None
+
+class OrderOut(BaseModel):
+    id:               int
+    order_number:     str
+    customer_id:      Optional[int]
+    customer:         Optional[CustomerOut]
+    phone:            Optional[str]
+    cashier_name:     str
+    subtotal:         float
+    discount_type:    Optional[str]
+    discount_value:   float
+    discount_amount:  float
+    total:            float
+    payment_method:   str
+    payment_details:  Optional[str]
+    points_used:      int
+    points_earned:    int
+    is_paid:          bool
+    paid_at:          Optional[datetime] = None
+    paid_by:          Optional[str] = None
+    status:           str
+    notes:            Optional[str]
+    created_at:       datetime
+    deleted_at:       Optional[datetime] = None
+    is_flagged:       bool = False
+    flagged_at:       Optional[datetime] = None
+    flagged_reason:   Optional[str] = None
+    flagged_by:       Optional[str] = None
+    items:            List[OrderItemOut]
+
+    @field_serializer('created_at')
+    def _ser_created_at(self, v): return _utc_iso(v)
+
+    @field_serializer('deleted_at')
+    def _ser_deleted_at(self, v): return _utc_iso(v)
+
+    @field_serializer('flagged_at')
+    def _ser_flagged_at(self, v): return _utc_iso(v)
+
+    @field_serializer('paid_at')
+    def _ser_paid_at(self, v): return _utc_iso(v)
+
+    class Config:
+        from_attributes = True
+
+
+# ── Inventory ──────────────────────────────────────────
+class InventoryCreate(BaseModel):
+    name:         str
+    unit:         str = "кг"
+    quantity:     float = 0.0
+    min_quantity: float = 1.0
+    cost_price:   float = 0.0
+    sale_price:   float = 0.0
+    is_for_sale:  bool = False
+    supplier:     Optional[str] = None
+
+class InventoryUpdate(BaseModel):
+    quantity:     Optional[float] = None
+    min_quantity: Optional[float] = None
+    cost_price:   Optional[float] = None
+    sale_price:   Optional[float] = None
+    is_for_sale:  Optional[bool]  = None
+
+class InventoryOut(BaseModel):
+    id:           int
+    name:         str
+    unit:         str
+    quantity:     float
+    min_quantity: float
+    cost_price:   float
+    sale_price:   float
+    is_for_sale:  bool
+    supplier:     Optional[str]
+    updated_at:   Optional[datetime]
+    is_low:       bool = False   # computed
+
+    class Config:
+        from_attributes = True
+
+
+# ── Coupon ─────────────────────────────────────────────
+class CouponCreate(BaseModel):
+    code:          str
+    discount_type: DiscountType
+    discount_value: float
+    min_amount:    float = 0.0
+    max_uses:      Optional[int] = None
+    expires_at:    Optional[datetime] = None
+
+class CouponValidate(BaseModel):
+    code:   str
+    amount: float
+
+class CouponOut(BaseModel):
+    id:             int
+    code:           str
+    discount_type:  str
+    discount_value: float
+    min_amount:     float
+    max_uses:       Optional[int]
+    used_count:     int
+    is_active:      bool
+    expires_at:     Optional[datetime] = None
+    created_at:     Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ── User / Auth ────────────────────────────────────────
+class UserRole(str, Enum):
+    admin   = "admin"
+    cashier = "cashier"
+
+
+class UserCreate(BaseModel):
+    username:  str
+    full_name: str
+    password:  str
+    role:      UserRole = UserRole.cashier
+
+
+class UserUpdate(BaseModel):
+    full_name: Optional[str]      = None
+    role:      Optional[UserRole] = None
+    is_active: Optional[bool]     = None
+
+
+class UserPasswordReset(BaseModel):
+    new_password: str
+
+
+class UserOut(BaseModel):
+    id:         int
+    username:   str
+    full_name:  str
+    role:       str
+    is_active:  bool
+    created_at: datetime
+
+    @field_serializer('created_at')
+    def _ser_created_at(self, v): return _utc_iso(v)
+
+    class Config:
+        from_attributes = True
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type:   str     = "bearer"
+    user:         UserOut
+
+
+# ── Report ─────────────────────────────────────────────
+class DailySummary(BaseModel):
+    date:          str
+    total_orders:  int
+    total_revenue: float
+    cash:          float
+    card:          float
+    social_pay:    float
+    points:        float
+
+class ReportFilter(BaseModel):
+    start_date: str   # YYYY-MM-DD
+    end_date:   str
+
+
+# ── CashierShift (Ээлж) ───────────────────────────────────
+class ShiftOut(BaseModel):
+    id:          int
+    user_id:     int
+    user:        Optional[UserOut] = None
+    started_at:  datetime
+    ended_at:    Optional[datetime] = None
+    status:      str
+
+    @field_serializer('started_at')
+    def _ser_started(self, v): return _utc_iso(v)
+
+    @field_serializer('ended_at')
+    def _ser_ended(self, v): return _utc_iso(v)
+
+    class Config:
+        from_attributes = True
+
+
+class ShiftSummary(BaseModel):
+    shift:          ShiftOut
+    total_orders:   int
+    total_customers: int
+    total_revenue:  float     # бодитоор орсон мөнгө (бэлэн + шилжүүлэг + карт)
+    cash_total:     float
+    transfer_total: float
+    card_total:     float
+    unpaid_total:   float = 0.0   # төлбөр төлөөгүй үлдэгдэл
+    late_total:     float = 0.0   # нөхөж авсан төлбөр (өмнөх өдрийн захиалга)
+
+
+# ── Machine (Машин) ───────────────────────────────────────
+class MachineType(str, Enum):
+    WASHER      = "washer"
+    DRYER       = "dryer"
+    SHOE_WASHER = "shoe_washer"
+
+
+class MachineCreate(BaseModel):
+    name:         str
+    machine_type: MachineType
+
+
+class MachineUpdate(BaseModel):
+    name:         Optional[str]  = None
+    machine_type: Optional[MachineType] = None
+    is_active:    Optional[bool] = None
+
+
+class MachineUsageOut(BaseModel):
+    id:            int
+    machine_id:    int
+    order_id:      int
+    order_item_id: Optional[int]
+    sub_index:     int = 0
+    customer_name: Optional[str]
+    service_name:  Optional[str]
+    duration_min:  int
+    started_at:    datetime
+    ended_at:      Optional[datetime]
+    status:        str
+
+    @field_serializer('started_at')
+    def _ser_started(self, v): return _utc_iso(v)
+
+    @field_serializer('ended_at')
+    def _ser_ended(self, v): return _utc_iso(v)
+
+    class Config:
+        from_attributes = True
+
+
+class MachineOut(BaseModel):
+    id:            int
+    name:          str
+    machine_type:  str
+    is_active:     bool
+    current_usage: Optional[MachineUsageOut] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AssignMachineRequest(BaseModel):
+    order_id:      int
+    order_item_id: int
+    sub_index:     int = 0  # quantity дотор хэддэх нь (0-based)
+    duration_min:  int      # үйлчилгээний хугацаа (минут)
+
+
+class DailyMachineSummary(BaseModel):
+    machine_id:     int
+    machine_name:   str
+    total_services: int
+    total_minutes:  int

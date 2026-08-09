@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "Цэмбий Laundry",
+    "slug": "laundry-pos",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#111827"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.cemby.laundrypos"
+    },
+    "android": {
+      "package": "com.cemby.laundrypos",
+      "adaptiveIcon": {
+        "backgroundColor": "#111827"
+      },
+      "usesCleartextTraffic": true
+    }
+  }
+}
