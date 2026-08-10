@@ -17,7 +17,7 @@ export function AdmitModal({ session, rooms, onClose, onAssigned }) {
     setBusy(true)
     try {
       await roomsApi.assign(session.id, room.id)
-      toast.success(`${queueLabel(session.queue_no)} → Өрөө №${room.number}`)
+      toast.success(`Оочир ${queueLabel(session.queue_no)} → Өрөө №${room.number}`)
       onAssigned?.()
       onClose()
     } catch {
@@ -47,7 +47,7 @@ export function AdmitModal({ session, rooms, onClose, onAssigned }) {
           <div>
             <h3 className="font-bold text-gray-800">Өрөө оруулах</h3>
             <p className="text-xs text-gray-500 mt-0.5">
-              {queueLabel(session.queue_no)} · {session.type_name} · {session.customer_name}
+              Оочир {queueLabel(session.queue_no)} · {session.type_name} · {session.customer_name}
             </p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100"><X size={18} /></button>
@@ -86,9 +86,11 @@ function QueueRow({ session, index, onAdmit, onCancel, readOnly }) {
 
   return (
     <div className={`flex items-center gap-3 p-3 rounded-xl border ${index === 0 ? 'border-cyan-300 bg-cyan-50' : 'border-gray-200 bg-white'}`}>
-      <div className="flex-shrink-0 w-14 text-center">
-        <div className="font-bold text-cyan-700 leading-none">{queueLabel(session.queue_no)}</div>
-        {index === 0 && <div className="text-[10px] text-cyan-600 font-medium mt-0.5">Дараагийн</div>}
+      {/* Оочирын тасалбар — өрөөний дугаараас ялгарах шар өнгө + «ООЧИР» тайлбар */}
+      <div className="flex-shrink-0 w-16 text-center rounded-lg bg-amber-50 border border-amber-300 py-1">
+        <div className="text-[9px] font-bold text-amber-500 tracking-widest leading-none">ООЧИР</div>
+        <div className="font-black text-amber-700 leading-tight tabular-nums">{queueLabel(session.queue_no)}</div>
+        {index === 0 && <div className="text-[9px] text-cyan-600 font-bold leading-none pb-0.5">Дараагийн</div>}
       </div>
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium text-gray-800 truncate">{session.type_name}</div>
@@ -128,7 +130,7 @@ export default function QueuePanel({ waiting = [], rooms = [], types = [], onRef
 
   const handleCancel = async (session) => {
     const ok = window.confirm(
-      `${session.type_name} — ${queueLabel(session.queue_no)} тасалбарыг цуцлах уу?\n\n` +
+      `${session.type_name} — Оочир ${queueLabel(session.queue_no)} тасалбарыг цуцлах уу?\n\n` +
       'Төлбөр буцаахгүй. Буцаалт хийх бол захиалгыг устгана уу.'
     )
     if (!ok) return

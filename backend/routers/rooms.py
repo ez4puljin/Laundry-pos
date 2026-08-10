@@ -413,8 +413,33 @@ def queue_board(db: Session = Depends(get_db)):
         .all()
     )
 
+    # Өрөөний төлөвийн самбар — зөвхөн нийтэд зориулсан мэдээлэл
+    # (өрөөний дугаар, төрөл, төлөв, үлдсэн минут — нэр/утас/дүн ОГТ байхгүй)
+    now_naive = _now_local().replace(tzinfo=None)
+    rooms_out = []
+    for room in (
+        db.query(models.Room)
+        .filter(models.Room.is_active == True)
+        .order_by(models.Room.id)
+        .all()
+    ):
+        s = _active_session(room.id, db)
+        remaining_min = None
+        if s and s.status == "in_use" and s.started_at:
+            started = s.started_at.replace(tzinfo=None) if s.started_at.tzinfo else s.started_at
+            end = started + timedelta(minutes=s.duration_min or 0)
+            remaining_min = max(0, int((end - now_naive).total_seconds() // 60))
+        rooms_out.append({
+            "number": room.number,
+            "type_name": room.room_type.name if room.room_type else None,
+            "color": room.room_type.color if room.room_type else None,
+            "status": s.status if s else "free",
+            "remaining_min": remaining_min,
+        })
+
     return {
         "types": [{"id": t.id, "name": t.name, "color": t.color} for t in types],
+        "rooms": rooms_out,
         "waiting": [
             {"queue_no": s.queue_no, "type_name": s.type_name, "room_type_id": s.room_type_id}
             for s in waiting

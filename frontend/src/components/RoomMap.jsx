@@ -20,8 +20,8 @@ export function roomStatus(room) {
   return room.active_session.status
 }
 
-/* Дарааллын дугаар — төрөл бүрээр тусдаа тоологддог, 3 оронтой (001) */
-export const queueLabel = (n) => String(n ?? 0).padStart(3, '0')
+/* Дарааллын дугаар — төрөл бүрээр тусдаа тоологддог, 3 оронтой (№001) */
+export const queueLabel = (n) => `№${String(n ?? 0).padStart(3, '0')}`
 
 /* Grid хэмжээст background шугамууд */
 const gridBg = {
@@ -59,7 +59,7 @@ function RoomCell({ room, onClick, selected }) {
     `Өрөө №${room.number}`,
     room.room_type?.name,
     overdue ? 'Хугацаа хэтэрсэн!' : meta.label,
-    session?.queue_no > 0 ? `Дараалал ${queueLabel(session.queue_no)}` : null,
+    session?.queue_no > 0 ? `Оочир ${queueLabel(session.queue_no)}` : null,
     status === 'in_use' ? `Үлдсэн ${timeLabel}` : null,
   ].filter(Boolean).join(' · ')
 
@@ -113,8 +113,8 @@ function RoomCell({ room, onClick, selected }) {
       )}
 
       {density === 'full' && session?.queue_no > 0 && status === 'reserved' && (
-        <span className="text-[10px] font-bold text-amber-700 mt-0.5">
-          {queueLabel(session.queue_no)}
+        <span className="text-[10px] font-bold text-amber-700 mt-0.5 px-1.5 rounded-full bg-amber-100">
+          Оочир {queueLabel(session.queue_no)}
         </span>
       )}
     </button>

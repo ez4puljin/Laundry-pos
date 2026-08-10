@@ -106,8 +106,8 @@ export default function RoomActionModal({ room, role, onClose, onDone }) {
             <div className="text-xs text-gray-600 space-y-1">
               {session.queue_no > 0 && (
                 <div className="flex justify-between">
-                  <span className="text-gray-400">Дараалал</span>
-                  <span className="font-bold text-cyan-700">{queueLabel(session.queue_no)}</span>
+                  <span className="text-gray-400">Оочир</span>
+                  <span className="font-bold text-amber-700 bg-amber-50 px-1.5 rounded">{queueLabel(session.queue_no)}</span>
                 </div>
               )}
               {session.customer_name && (

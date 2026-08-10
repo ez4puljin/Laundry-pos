@@ -36,7 +36,9 @@ function RoomCard({ room, role, onAction, busy }) {
       {session && (
         <div className="mt-2 text-xs text-gray-600 space-y-0.5">
           {session.queue_no > 0 && (
-            <div className="font-medium text-cyan-700">{queueLabel(session.queue_no)}</div>
+            <div className="inline-block font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 rounded">
+              Оочир {queueLabel(session.queue_no)}
+            </div>
           )}
           {session.customer_name && <div className="truncate">{session.customer_name}</div>}
           {session.cleaned_by && status === 'cleaning' && (
