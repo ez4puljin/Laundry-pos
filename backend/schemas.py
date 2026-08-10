@@ -144,15 +144,18 @@ class InventoryBriefOut(BaseModel):
 
 # ── Order Item ─────────────────────────────────────────
 class OrderItemCreate(BaseModel):
-    service_id:  Optional[int] = None   # үйлчилгээний захиалга
-    product_id:  Optional[int] = None   # бараа зарах
-    quantity:    int = 1
-    notes:       Optional[str] = None
+    service_id:   Optional[int] = None   # үйлчилгээний захиалга
+    product_id:   Optional[int] = None   # бараа зарах
+    room_id:      Optional[int] = None   # шүршүүр — тодорхой өрөө сонгосон
+    room_type_id: Optional[int] = None   # шүршүүр — дарааллын тасалбар (өрөөгүй)
+    quantity:     int = 1
+    notes:        Optional[str] = None
 
 class OrderItemOut(BaseModel):
     id:          int
     service_id:  Optional[int]
     product_id:  Optional[int]
+    room_id:     Optional[int] = None
     item_type:   str = "service"
     item_name:   Optional[str]
     quantity:    int
@@ -304,6 +307,7 @@ class CouponOut(BaseModel):
 class UserRole(str, Enum):
     admin   = "admin"
     cashier = "cashier"
+    cleaner = "cleaner"    # Үйлчлэгч (цэвэрлэгээ)
 
 
 class UserCreate(BaseModel):
@@ -459,3 +463,118 @@ class DailyMachineSummary(BaseModel):
     machine_name:   str
     total_services: int
     total_minutes:  int
+
+
+# ── Шүршүүр: Өрөөний төрөл ────────────────────────────────
+class RoomTypeCreate(BaseModel):
+    name:         str
+    price:        float
+    duration_min: int = 60
+    color:        str = "#38bdf8"
+    sort_order:   int = 0
+
+
+class RoomTypeUpdate(BaseModel):
+    name:         Optional[str]   = None
+    price:        Optional[float] = None
+    duration_min: Optional[int]   = None
+    color:        Optional[str]   = None
+    sort_order:   Optional[int]   = None
+    is_active:    Optional[bool]  = None
+
+
+class RoomTypeOut(BaseModel):
+    id:           int
+    name:         str
+    price:        float
+    duration_min: int
+    color:        str
+    sort_order:   int
+    is_active:    bool
+
+    class Config:
+        from_attributes = True
+
+
+# ── Шүршүүр: Өрөө ─────────────────────────────────────────
+class RoomCreate(BaseModel):
+    number:       str
+    room_type_id: int
+
+
+class RoomUpdate(BaseModel):
+    number:       Optional[str]  = None
+    room_type_id: Optional[int]  = None
+    is_active:    Optional[bool] = None
+
+
+class RoomLayoutItem(BaseModel):
+    id:    int
+    map_x: Optional[int] = None
+    map_y: Optional[int] = None
+    map_w: Optional[int] = None
+    map_h: Optional[int] = None
+
+
+class RoomLayoutUpdate(BaseModel):
+    items: List[RoomLayoutItem]
+
+
+class RoomAssignRequest(BaseModel):
+    room_id: int
+
+
+class RoomSessionOut(BaseModel):
+    id:                  int
+    room_id:             Optional[int]
+    room_type_id:        int
+    order_id:            int
+    order_item_id:       Optional[int]
+    queue_no:            int
+    room_number:         Optional[str]
+    type_name:           Optional[str]
+    customer_name:       Optional[str]
+    price:               float
+    duration_min:        int
+    status:              str
+    created_at:          datetime
+    started_at:          Optional[datetime] = None
+    ended_at:            Optional[datetime] = None
+    cleaning_started_at: Optional[datetime] = None
+    cleaned_at:          Optional[datetime] = None
+    cleaned_by:          Optional[str] = None
+
+    # Таймер зөв ажиллахын тулд бүх datetime-д ижил serializer
+    @field_serializer('created_at')
+    def _ser_created(self, v): return _utc_iso(v)
+
+    @field_serializer('started_at')
+    def _ser_started(self, v): return _utc_iso(v)
+
+    @field_serializer('ended_at')
+    def _ser_ended(self, v): return _utc_iso(v)
+
+    @field_serializer('cleaning_started_at')
+    def _ser_cleaning_started(self, v): return _utc_iso(v)
+
+    @field_serializer('cleaned_at')
+    def _ser_cleaned(self, v): return _utc_iso(v)
+
+    class Config:
+        from_attributes = True
+
+
+class RoomOut(BaseModel):
+    id:             int
+    number:         str
+    room_type_id:   int
+    is_active:      bool
+    map_x:          Optional[int] = None
+    map_y:          Optional[int] = None
+    map_w:          Optional[int] = None
+    map_h:          Optional[int] = None
+    room_type:      Optional[RoomTypeOut]    = None
+    active_session: Optional[RoomSessionOut] = None   # тооцоолсон
+
+    class Config:
+        from_attributes = True

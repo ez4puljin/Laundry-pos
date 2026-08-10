@@ -13,6 +13,10 @@ import DashboardPage from './pages/DashboardPage'
 import HistoryPage   from './pages/HistoryPage'
 import UsersPage     from './pages/UsersPage'
 import WarningsPage  from './pages/WarningsPage'
+import RoomsPage        from './pages/RoomsPage'
+import QueueDisplayPage from './pages/QueueDisplayPage'
+
+const STAFF = ['admin', 'cashier']
 
 export default function App() {
   return (
@@ -28,6 +32,8 @@ export default function App() {
 
         {/* Public */}
         <Route path="/login" element={<LoginPage />} />
+        {/* Хүлээлгийн танхимын ТВ дэлгэц — нэвтрэлтгүй */}
+        <Route path="/tv" element={<QueueDisplayPage />} />
 
         {/* Protected — any authenticated user */}
         <Route
@@ -36,11 +42,15 @@ export default function App() {
             <ProtectedRoute>
               <Layout>
                 <Routes>
-                  <Route path="/"          element={<POSPage />}       />
-                  <Route path="/queue"     element={<QueuePage />}     />
-                  <Route path="/history"   element={<HistoryPage />}   />
-                  <Route path="/warnings"  element={<WarningsPage />}  />
-                  <Route path="/customers" element={<CustomersPage />} />
+                  {/* Кассчин + Админ */}
+                  <Route path="/"          element={<ProtectedRoute roles={STAFF}><POSPage /></ProtectedRoute>}       />
+                  <Route path="/queue"     element={<ProtectedRoute roles={STAFF}><QueuePage /></ProtectedRoute>}     />
+                  <Route path="/history"   element={<ProtectedRoute roles={STAFF}><HistoryPage /></ProtectedRoute>}   />
+                  <Route path="/warnings"  element={<ProtectedRoute roles={STAFF}><WarningsPage /></ProtectedRoute>}  />
+                  <Route path="/customers" element={<ProtectedRoute roles={STAFF}><CustomersPage /></ProtectedRoute>} />
+
+                  {/* Бүх role — үйлчлэгч ч хамрагдана */}
+                  <Route path="/rooms"     element={<RoomsPage />} />
 
                   {/* Admin only */}
                   <Route path="/inventory" element={

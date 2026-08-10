@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import {
   ShoppingCart, Users, LayoutDashboard,
   WashingMachine, Settings2, ClipboardList,
-  UserCog, LogOut, Clock, AlertTriangle,
+  UserCog, LogOut, Clock, AlertTriangle, ShowerHead,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import useStore     from '../store/useStore'
@@ -13,6 +13,7 @@ import { shiftsApi } from '../api/client'
 const ALL_NAV = [
   { to: '/',          label: 'POS Кассчин',  short: 'Касс',      icon: ShoppingCart,    roles: ['admin', 'cashier'] },
   { to: '/queue',     label: 'Дараалал',     short: 'Дараалал',  icon: WashingMachine,  roles: ['admin', 'cashier'] },
+  { to: '/rooms',     label: 'Шүршүүр',      short: 'Шүршүүр',   icon: ShowerHead,      roles: ['admin', 'cashier', 'cleaner'] },
   { to: '/history',   label: 'Түүх',         short: 'Түүх',      icon: ClipboardList,   roles: ['admin', 'cashier'] },
   { to: '/warnings',  label: 'Анхааруулга',  short: 'Анхаар',    icon: AlertTriangle,   roles: ['admin', 'cashier'] },
   { to: '/customers', label: 'Үйлчлүүлэгч', short: 'Харилцагч', icon: Users,           roles: ['admin', 'cashier'] },

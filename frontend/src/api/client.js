@@ -149,6 +149,30 @@ export const machinesApi = {
   usagesByOrder: (orderId)    => api.get(`/machines/usages-by-order/${orderId}`),
 }
 
+// ── Шүршүүр: Өрөөний төрөл ────────────────────────────────
+export const roomTypesApi = {
+  list:   (params = {}) => api.get('/room-types/', { params }),
+  create: (data)     => api.post('/room-types/', data),
+  update: (id, data) => api.put(`/room-types/${id}`, data),
+  remove: (id)       => api.delete(`/room-types/${id}`),
+}
+
+// ── Шүршүүр: Өрөө ба дараалал ─────────────────────────────
+export const roomsApi = {
+  list:          (params = {}) => api.get('/rooms/', { params }),
+  create:        (data)     => api.post('/rooms/', data),
+  update:        (id, data) => api.put(`/rooms/${id}`, data),
+  remove:        (id)       => api.delete(`/rooms/${id}`),
+  saveLayout:    (items)    => api.put('/rooms/layout', { items }),
+  start:         (id)       => api.post(`/rooms/${id}/start`),
+  finish:        (id)       => api.post(`/rooms/${id}/finish`),
+  cleaningStart: (id)       => api.post(`/rooms/${id}/cleaning-start`),
+  cleaningDone:  (id)       => api.post(`/rooms/${id}/cleaning-done`),
+  waiting:       ()         => api.get('/room-sessions/waiting'),
+  assign:        (sid, roomId) => api.post(`/room-sessions/${sid}/assign`, { room_id: roomId }),
+  cancelTicket:  (sid)      => api.post(`/room-sessions/${sid}/cancel`),
+}
+
 // ── Settings ──────────────────────────────────────────────
 export const settingsApi = {
   getSms:       ()     => api.get('/settings/sms'),

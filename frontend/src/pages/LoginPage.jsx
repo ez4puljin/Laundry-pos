@@ -4,6 +4,7 @@ import { WashingMachine, Loader2, Eye, EyeOff } from 'lucide-react'
 import toast from 'react-hot-toast'
 import axios from 'axios'
 import useAuthStore from '../store/useAuthStore'
+import { homeFor } from '../components/ProtectedRoute'
 
 export default function LoginPage() {
   const [username, setUsername] = useState('')
@@ -27,7 +28,7 @@ export default function LoginPage() {
       })
       setAuth(res.data.user, res.data.access_token)
       toast.success(`Тавтай морил, ${res.data.user.full_name}!`)
-      navigate('/', { replace: true })
+      navigate(homeFor(res.data.user.role), { replace: true })
     } catch (err) {
       const msg = err.response?.data?.detail || 'Нэвтрэх нэр эсвэл нууц үг буруу байна'
       toast.error(msg)

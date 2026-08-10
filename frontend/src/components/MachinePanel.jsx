@@ -3,6 +3,7 @@ import { X, Play, Square, BarChart3, Clock, User, ChevronDown, ChevronUp } from 
 import toast from 'react-hot-toast'
 import dayjs from 'dayjs'
 import { machinesApi, ordersApi, categoriesApi } from '../api/client'
+import useCountdown from '../hooks/useCountdown'
 
 const TYPE_LABELS = {
   washer:      '🧼 Угаалга',
@@ -15,33 +16,6 @@ const TYPE_COLORS = {
   dryer:       { idle: 'border-orange-200 bg-orange-50', running: 'border-orange-400 bg-orange-50', badge: 'bg-orange-100 text-orange-700' },
   shoe_washer: { idle: 'border-purple-200 bg-purple-50', running: 'border-purple-400 bg-purple-50', badge: 'bg-purple-100 text-purple-700' },
 }
-
-/* ── Countdown timer hook ────────────────────────────── */
-function useCountdown(startedAt, durationMin) {
-  const [now, setNow] = useState(Date.now())
-
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(id)
-  }, [])
-
-  if (!startedAt || !durationMin) return { remaining: 0, total: 0, progress: 0, isOverdue: false, label: '--:--' }
-
-  const start = dayjs(startedAt.endsWith('Z') || startedAt.includes('+') ? startedAt : startedAt + 'Z')
-  const endTime = start.add(durationMin, 'minute')
-  const remainSec = Math.max(0, endTime.diff(now, 'second'))
-  const totalSec = durationMin * 60
-  const elapsed = totalSec - remainSec
-  const progress = Math.min(100, (elapsed / totalSec) * 100)
-  const isOverdue = remainSec <= 0
-
-  const mins = Math.floor(remainSec / 60)
-  const secs = remainSec % 60
-  const label = isOverdue ? '00:00' : `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
-
-  return { remaining: remainSec, total: totalSec, progress, isOverdue, label }
-}
-
 
 /* ── Machine Card ─────────────────────────────────────── */
 function MachineCard({ machine, onClickIdle, onComplete }) {

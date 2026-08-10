@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from database import engine, SessionLocal
 import models
-from routers import services, customers, orders, inventory, reports, categories, machines, settings, shifts
+from routers import services, customers, orders, inventory, reports, categories, machines, settings, shifts, rooms
 from routers import users as users_router
 from auth import get_current_user, require_admin, hash_password
 
@@ -237,6 +237,13 @@ def _migrate():
             conn.execute(text("ALTER TABLE orders ADD COLUMN cashier_id INTEGER"))
             conn.commit()
 
+    # order_items.room_id (Шүршүүрийн өрөө)
+    oi_cols_room = [c["name"] for c in inspect(engine).get_columns("order_items")]
+    if "room_id" not in oi_cols_room:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE order_items ADD COLUMN room_id INTEGER REFERENCES rooms(id)"))
+            conn.commit()
+
     print("Migration done.")
 
 
@@ -283,6 +290,18 @@ def _seed():
                 db.add(models.Machine(**m))
             db.commit()
             print("Default machines created (5)")
+
+        # ── Шүршүүрийн өрөөний төрөл ──────────────────────
+        # Өрөөнүүдийг seed хийхгүй — Удирдлага цэснээс зурж үүсгэнэ
+        if db.query(models.RoomType).count() == 0:
+            room_types_data = [
+                dict(name="1 хүний", price=5000, duration_min=60, color="#38bdf8", sort_order=0),
+                dict(name="2 хүний", price=8000, duration_min=60, color="#a78bfa", sort_order=1),
+            ]
+            for rt in room_types_data:
+                db.add(models.RoomType(**rt))
+            db.commit()
+            print("Default room types created (2)")
     except Exception as e:
         print(f"Seed error: {e}")
         db.rollback()
@@ -341,6 +360,12 @@ app.include_router(machines.router, dependencies=[Depends(get_current_user)])
 app.include_router(settings.router, dependencies=[Depends(get_current_user)])
 # Shifts: authenticated users
 app.include_router(shifts.router, dependencies=[Depends(get_current_user)])
+# Шүршүүр: CRUD нь admin (router дотроо), унших/шилжилт нь нэвтэрсэн хэрэглэгч
+app.include_router(rooms.types_router,    dependencies=[Depends(get_current_user)])
+app.include_router(rooms.router,          dependencies=[Depends(get_current_user)])
+app.include_router(rooms.sessions_router, dependencies=[Depends(get_current_user)])
+# Хүлээлгийн танхимын дэлгэц — нэвтрэлтгүй
+app.include_router(rooms.public_router)
 
 
 @app.get("/")
@@ -355,6 +380,7 @@ def cleanup_data():
     db = SessionLocal()
     try:
         db.execute(text("DELETE FROM machine_usages"))
+        db.execute(text("DELETE FROM room_sessions"))
         db.execute(text("DELETE FROM service_machines"))
         db.execute(text("DELETE FROM order_items"))
         db.execute(text("DELETE FROM orders"))

@@ -1,7 +1,12 @@
-import { useState, useEffect } from 'react'
-import { Search, Plus, Package, Wrench } from 'lucide-react'
-import { servicesApi, inventoryApi, categoriesApi } from '../api/client'
+import { useState, useEffect, useCallback } from 'react'
+import { Search, Plus, Package, Wrench, ShowerHead, Clock, UserPlus } from 'lucide-react'
+import toast from 'react-hot-toast'
+import { servicesApi, inventoryApi, categoriesApi, roomsApi, roomTypesApi } from '../api/client'
 import useStore from '../store/useStore'
+import useAuthStore from '../store/useAuthStore'
+import RoomMap, { roomStatus, RoomLegend } from './RoomMap'
+import QueuePanel from './QueuePanel'
+import RoomActionModal from './RoomActions'
 
 export default function ServiceGrid() {
   const [mainTab, setMainTab]               = useState('services')
@@ -82,7 +87,16 @@ export default function ServiceGrid() {
           icon={<Package className="w-4 h-4" />}
           label="Бараа материал"
         />
+        <MainTab
+          active={mainTab === 'rooms'}
+          onClick={() => setMainTab('rooms')}
+          icon={<ShowerHead className="w-4 h-4" />}
+          label="Шүршүүр"
+        />
       </div>
+
+      {/* ════════ SHOWER TAB ════════ */}
+      {mainTab === 'rooms' && <ShowerTab />}
 
       {/* ════════ SERVICES TAB ════════ */}
       {mainTab === 'services' && (
@@ -210,6 +224,161 @@ export default function ServiceGrid() {
     </div>
   )
 }
+
+/* ════════ Шүршүүрийн таб ═══════════════════════════════ */
+function ShowerTab() {
+  const [rooms, setRooms]       = useState([])
+  const [types, setTypes]       = useState([])
+  const [waiting, setWaiting]   = useState([])
+  const [addons, setAddons]     = useState([])
+  const [loading, setLoading]   = useState(true)
+  const [actionRoom, setActionRoom] = useState(null)
+
+  const addToCart = useStore(s => s.addToCart)
+  const cart      = useStore(s => s.cart)
+  const role      = useAuthStore(s => s.user?.role)
+
+  const fetchLive = useCallback(() => {
+    Promise.all([roomsApi.list(), roomsApi.waiting()])
+      .then(([r, w]) => { setRooms(r.data || []); setWaiting(w.data || []) })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  useEffect(() => {
+    roomTypesApi.list({ active_only: true }).then(r => setTypes(r.data || [])).catch(() => {})
+    inventoryApi.list({ for_sale: true })
+      .then(r => setAddons((r.data || []).filter(p => p.sale_price != null)))
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    fetchLive()
+    const id = setInterval(fetchLive, 10000)
+    return () => clearInterval(id)
+  }, [fetchLive])
+
+  const handleRoomClick = (room) => {
+    const status = roomStatus(room)
+    // Сул өрөө → сагсанд; ашиглагдаж буй өрөө → статус шилжүүлэх цонх
+    if (status !== 'free') {
+      if (status === 'inactive') return toast.error('Өрөө идэвхгүй байна', { id: 'room-off' })
+      setActionRoom(room)
+      return
+    }
+    if (cart.some(i => i.key === `room_${room.id}`)) {
+      toast('Энэ өрөө сагсанд байна', { id: 'room-dup' })
+      return
+    }
+    addToCart(room, 'room')
+    toast.success(`Өрөө №${room.number} сагсанд нэмэгдлээ`)
+  }
+
+  const freeCount = (typeId) =>
+    rooms.filter(r => r.room_type_id === typeId && r.is_active && roomStatus(r) === 'free').length
+
+  const waitCount = (typeId) => waiting.filter(w => w.room_type_id === typeId).length
+
+  return (
+    <div className="flex-1 overflow-y-auto p-4 space-y-5">
+      {/* ── Өрөөний төрлүүд ── */}
+      {types.length === 0 ? (
+        <div className="flex flex-col items-center justify-center h-40 text-gray-400 gap-2">
+          <ShowerHead className="w-12 h-12 opacity-20" />
+          <p className="text-sm font-medium">Өрөөний төрөл алга</p>
+          <p className="text-xs text-center text-gray-300 px-4">
+            Удирдлага → Өрөөний төрөл цэснээс нэмнэ үү
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+          {types.map(t => (
+            <div
+              key={t.id}
+              className="bg-white rounded-xl border border-gray-200 p-3 overflow-hidden relative"
+            >
+              <div className="absolute top-0 left-0 right-0 h-1" style={{ background: t.color }} />
+              <div className="mt-1">
+                <p className="text-sm font-semibold text-gray-800 leading-snug">{t.name}</p>
+                <div className="flex items-center justify-between mt-1">
+                  <span className="text-base font-bold text-cyan-600">{t.price.toLocaleString()}₮</span>
+                  <span className="text-xs text-gray-400 inline-flex items-center gap-0.5">
+                    <Clock size={11} /> {t.duration_min}мин
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center justify-between mt-2 gap-2">
+                <span className="flex items-center gap-1">
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium
+                                    ${freeCount(t.id) > 0 ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                    Сул: {freeCount(t.id)}
+                  </span>
+                  {waitCount(t.id) > 0 && (
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-cyan-50 text-cyan-700">
+                      Оочир: {waitCount(t.id)}
+                    </span>
+                  )}
+                </span>
+                <button
+                  onClick={() => { addToCart(t, 'ticket'); toast.success('Дараалалд нэмэгдлээ') }}
+                  className="px-2.5 py-1 rounded-lg bg-cyan-600 text-white text-xs font-medium
+                             hover:bg-cyan-700 inline-flex items-center gap-1 whitespace-nowrap"
+                >
+                  <UserPlus size={12} /> Дараалалд
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Зураглал ── */}
+      {types.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+            <h3 className="text-sm font-bold text-gray-700">Өрөөний зураглал</h3>
+            <RoomLegend rooms={rooms} waitingCount={waiting.length} />
+          </div>
+          {loading
+            ? <div className="h-40 flex items-center justify-center text-sm text-gray-400">Уншиж байна...</div>
+            : <RoomMap rooms={rooms} onRoomClick={handleRoomClick} />}
+          <p className="text-xs text-gray-400 mt-2">
+            Сул өрөө дарж сагсанд нэмнэ · Ашиглагдаж буй өрөө дарж төлөв шилжүүлнэ
+          </p>
+        </div>
+      )}
+
+      {/* ── Дараалал (төрөл бүрээр тусдаа) ── */}
+      {types.length > 0 && (
+        <QueuePanel waiting={waiting} rooms={rooms} types={types} onRefresh={fetchLive} />
+      )}
+
+      {/* ── Нэмэлт бараа ── */}
+      {addons.length > 0 && (
+        <div>
+          <h3 className="text-sm font-bold text-gray-700 mb-2">Нэмэлт бараа</h3>
+          <div className="flex gap-3 overflow-x-auto pb-2">
+            {addons.map(p => (
+              <div key={p.id} className="w-36 flex-shrink-0">
+                <ProductCard product={p} onAdd={() => addToCart(p, 'product')} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {actionRoom && (
+        <RoomActionModal
+          room={rooms.find(r => r.id === actionRoom.id) || actionRoom}
+          role={role}
+          onClose={() => setActionRoom(null)}
+          onDone={fetchLive}
+        />
+      )}
+    </div>
+  )
+}
+
 
 /* ── Helpers ─────────────────────────────────────────────── */
 

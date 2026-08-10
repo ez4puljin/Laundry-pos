@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   Trash2, Plus, Minus, Tag, ChevronDown, ChevronUp,
-  Banknote, Smartphone, ArrowLeftRight, Gift, Package, Layers
+  Banknote, Smartphone, ArrowLeftRight, Gift, Package, Layers, ShowerHead
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import useStore     from '../store/useStore'
@@ -21,8 +21,11 @@ export default function Cart({ onOrderComplete }) {
     paymentMethod, mixedAmounts,
     updateQuantity, removeFromCart, setDiscount, setCouponCode,
     setPointsToUse, setPaymentMethod, setMixedAmounts, clearCart,
-    getSubtotal, getDiscountAmount, getTotal, setLastOrder
+    getSubtotal, getDiscountAmount, getTotal, getItemPrice, setLastOrder
   } = useStore()
+
+  // Шүршүүр сагсанд байвал «Дараа төлөх» боломжгүй
+  const hasShower = cart.some(i => i.itemType === 'room' || i.itemType === 'ticket')
 
   const authUser = useAuthStore(s => s.user)
 
@@ -39,6 +42,11 @@ export default function Cart({ onOrderComplete }) {
       .catch(() => {})
   }, [])
 
+  // «Дараа төлнө» сонгоод шүршүүр нэмбэл бэлэн мөнгө рүү буцаана
+  useEffect(() => {
+    if (hasShower && paymentMethod === 'unpaid') setPaymentMethod('cash')
+  }, [hasShower, paymentMethod])
+
   // ── Hotkeys ─────────────────────────────────────────────
   useEffect(() => {
     const handler = (e) => {
@@ -51,7 +59,11 @@ export default function Cart({ onOrderComplete }) {
         case 'F2': e.preventDefault(); setPaymentMethod('transfer'); break
         case 'F3': e.preventDefault(); setPaymentMethod('card');     break
         case 'F4': e.preventDefault(); setPaymentMethod('mixed');    break
-        case 'F5': e.preventDefault(); setPaymentMethod('unpaid');   break
+        case 'F5':
+          e.preventDefault()
+          if (hasShower) toast.error('Шүршүүрийн захиалгад «Дараа төлөх» боломжгүй', { id: 'co-shower' })
+          else setPaymentMethod('unpaid')
+          break
         case 'F9': e.preventDefault(); handleCheckout();             break
         case 'Delete':
           if (!inInput && cart.length > 0) {
@@ -65,7 +77,7 @@ export default function Cart({ onOrderComplete }) {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [cart, submitting, paymentMethod, mixedAmounts, customer, orderPhone, pointsToUse])
+  }, [cart, submitting, paymentMethod, mixedAmounts, customer, orderPhone, pointsToUse, hasShower])
 
   const subtotal        = getSubtotal()
   const discountAmount  = getDiscountAmount()
@@ -96,6 +108,9 @@ export default function Cart({ onOrderComplete }) {
     if (!customer && orderPhone.length !== 8) {
       return toast.error('Харилцагч сонгох эсвэл 8 оронтой SMS дугаар оруулна уу', { id: 'co-customer' })
     }
+    if (hasShower && paymentMethod === 'unpaid') {
+      return toast.error('Шүршүүрийн захиалгад «Дараа төлөх» боломжгүй', { id: 'co-shower' })
+    }
 
     // Хосолсон төлбөр шалгах
     if (paymentMethod === 'mixed') {
@@ -125,10 +140,12 @@ export default function Cart({ onOrderComplete }) {
         customer_id:     customer?.id || null,
         phone:           !customer && orderPhone.length === 8 ? orderPhone : null,
         items:           cart.map(i => {
-          if (i.itemType === 'service') {
-            return { service_id: i.item.id, quantity: i.quantity, notes: i.notes || null }
-          } else {
-            return { product_id: i.item.id, quantity: i.quantity, notes: i.notes || null }
+          const base = { quantity: i.quantity, notes: i.notes || null }
+          switch (i.itemType) {
+            case 'service': return { ...base, service_id: i.item.id }
+            case 'room':    return { ...base, room_id: i.item.id, quantity: 1 }
+            case 'ticket':  return { ...base, room_type_id: i.item.id }
+            default:        return { ...base, product_id: i.item.id }
           }
         }),
         discount_type:   discount.type,
@@ -163,39 +180,65 @@ export default function Cart({ onOrderComplete }) {
     <div className="flex flex-col h-full">
       {/* Cart items */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        {cart.map(({ key, itemType, item, quantity, notes }) => {
-          const price = itemType === 'service' ? item.price : item.sale_price
+        {cart.map((ci) => {
+          const { key, itemType, item, quantity, notes } = ci
+          const price   = getItemPrice(ci)
+          const isRoom  = itemType === 'room'
+          const isTicket = itemType === 'ticket'
+          const title = isRoom
+            ? `Шүршүүр №${item.number}`
+            : isTicket
+              ? `Шүршүүр — ${item.name}`
+              : item.name
+          const subtitle = isRoom
+            ? `${item.room_type?.name} · ${item.room_type?.duration_min}мин`
+            : isTicket
+              ? `Дараалал · ${item.duration_min}мин`
+              : null
           return (
             <div key={key} className="bg-white rounded-xl p-3 border border-gray-100 shadow-sm">
               <div className="flex items-start justify-between">
                 <div className="flex-1">
                   <div className="flex items-center gap-1.5">
-                    <p className="text-sm font-semibold text-gray-800">{item.name}</p>
+                    <p className="text-sm font-semibold text-gray-800">{title}</p>
                     {itemType === 'product' && (
                       <span className="inline-flex items-center gap-0.5 text-xs bg-green-100
                                        text-green-700 px-1.5 py-0.5 rounded-full font-medium">
                         <Package className="w-3 h-3" />
                       </span>
                     )}
+                    {(isRoom || isTicket) && (
+                      <span className="inline-flex items-center gap-0.5 text-xs bg-cyan-100
+                                       text-cyan-700 px-1.5 py-0.5 rounded-full font-medium">
+                        <ShowerHead className="w-3 h-3" />
+                      </span>
+                    )}
                   </div>
+                  {subtitle && <p className="text-xs text-cyan-600">{subtitle}</p>}
                   <p className="text-xs text-gray-400">{price.toLocaleString()}₮ × {quantity}</p>
                 </div>
                 <div className="flex items-center gap-1 ml-2">
-                  <button
-                    onClick={() => updateQuantity(key, quantity - 1)}
-                    className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center
-                               hover:bg-gray-200 transition-colors"
-                  >
-                    <Minus className="w-3 h-3" />
-                  </button>
-                  <span className="w-6 text-center text-sm font-bold">{quantity}</span>
-                  <button
-                    onClick={() => updateQuantity(key, quantity + 1)}
-                    className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center
-                               hover:bg-blue-200 transition-colors"
-                  >
-                    <Plus className="w-3 h-3 text-blue-600" />
-                  </button>
+                  {isRoom ? (
+                    <span className="w-6 text-center text-sm font-bold">1</span>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => updateQuantity(key, quantity - 1)}
+                        className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center
+                                   hover:bg-gray-200 transition-colors"
+                      >
+                        <Minus className="w-3 h-3" />
+                      </button>
+                      <span className="w-6 text-center text-sm font-bold">{quantity}</span>
+                      <button
+                        onClick={() => updateQuantity(key, quantity + 1)}
+                        className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center
+                                   hover:bg-blue-200 transition-colors"
+                      >
+                        <Plus className="w-3 h-3 text-blue-600" />
+                      </button>
+                    </>
+                  )}
                   <button
                     onClick={() => removeFromCart(key)}
                     className="w-7 h-7 rounded-full bg-red-50 flex items-center justify-center
@@ -342,8 +385,10 @@ export default function Cart({ onOrderComplete }) {
           {/* Дараа төлнө button */}
           <button
             onClick={() => setPaymentMethod('unpaid')}
+            disabled={hasShower}
+            title={hasShower ? 'Шүршүүрийн захиалгад боломжгүй' : undefined}
             className={`relative flex flex-col items-center justify-center py-2 rounded-xl border-2 text-xs
-                        font-medium transition-all
+                        font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed
                         ${paymentMethod === 'unpaid'
                           ? 'border-red-500 bg-red-50 text-red-700'
                           : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}

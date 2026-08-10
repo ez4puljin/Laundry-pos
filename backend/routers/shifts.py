@@ -104,8 +104,8 @@ def start_shift(
     db: Session = Depends(get_db)
 ):
     """Ээлж эхлэх"""
-    if current_user.role == "admin":
-        raise HTTPException(status_code=400, detail="Админ ээлж нээх шаардлагагүй")
+    if current_user.role != "cashier":
+        raise HTTPException(status_code=400, detail="Зөвхөн кассчин ээлж нээнэ")
 
     active = _get_active_shift(db)
     if active:

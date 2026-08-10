@@ -1,7 +1,9 @@
 import { create } from 'zustand'
 
-// Cart item structure: { key, itemType: 'service'|'product', item, quantity, notes }
+// Cart item structure: { key, itemType: 'service'|'product'|'room'|'ticket', item, quantity, notes }
 // key = `${itemType}_${item.id}`  (prevents service_1 and product_1 collision)
+// 'room'   = тодорхой шүршүүрийн өрөө (тоо ширхэг үргэлж 1)
+// 'ticket' = дарааллын тасалбар (item нь өрөөний төрөл)
 
 const useStore = create((set, get) => ({
   // ── Cart ─────────────────────────────────────────────
@@ -19,6 +21,7 @@ const useStore = create((set, get) => ({
     const key  = `${itemType}_${item.id}`
     const idx  = cart.findIndex(i => i.key === key)
     if (idx >= 0) {
+      if (itemType === 'room') return   // Нэг өрөөг зөвхөн нэг удаа
       const updated = [...cart]
       updated[idx] = { ...updated[idx], quantity: updated[idx].quantity + 1 }
       set({ cart: updated })
@@ -32,6 +35,8 @@ const useStore = create((set, get) => ({
       get().removeFromCart(key)
       return
     }
+    const it = get().cart.find(i => i.key === key)
+    if (it?.itemType === 'room' && quantity > 1) return   // Өрөө 1-д түгжээтэй
     set({ cart: get().cart.map(i => i.key === key ? { ...i, quantity } : i) })
   },
 
@@ -63,15 +68,21 @@ const useStore = create((set, get) => ({
   setMixedAmounts:  (v) => set({ mixedAmounts: v }),
 
   // ── Computed values ────────────────────────────────────
-  // Price helper: service uses .price, product uses .sale_price
-  getItemPrice: (cartItem) =>
-    cartItem.itemType === 'service' ? cartItem.item.price : cartItem.item.sale_price,
+  // Price helper: service → .price, product → .sale_price,
+  //               room → өрөөний төрлийн үнэ, ticket → төрлийн .price
+  getItemPrice: (cartItem) => {
+    switch (cartItem.itemType) {
+      case 'service': return cartItem.item.price
+      case 'product': return cartItem.item.sale_price
+      case 'room':    return cartItem.item.room_type?.price ?? 0
+      case 'ticket':  return cartItem.item.price
+      default:        return 0
+    }
+  },
 
   getSubtotal: () => {
-    return get().cart.reduce((sum, i) => {
-      const price = i.itemType === 'service' ? i.item.price : i.item.sale_price
-      return sum + price * i.quantity
-    }, 0)
+    const price = get().getItemPrice
+    return get().cart.reduce((sum, i) => sum + price(i) * i.quantity, 0)
   },
 
   getDiscountAmount: () => {

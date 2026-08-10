@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import {
   Plus, Pencil, Trash2, KeyRound,
   ShieldCheck, User, CheckCircle2, XCircle,
-  Loader2, X,
+  Loader2, X, Brush,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { usersApi } from '../api/client'
@@ -10,18 +10,20 @@ import useAuthStore from '../store/useAuthStore'
 
 const MODAL = { NONE: 0, CREATE: 1, EDIT: 2, RESET_PW: 3, DELETE: 4 }
 
-const RoleBadge = ({ role }) =>
-  role === 'admin' ? (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold
-                     bg-yellow-100 text-yellow-700 border border-yellow-200">
-      <ShieldCheck className="w-3 h-3" /> Admin
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold
-                     bg-blue-100 text-blue-700 border border-blue-200">
-      <User className="w-3 h-3" /> Кассчин
+const ROLE_META = {
+  admin:   { label: 'Admin',    Icon: ShieldCheck, badge: 'bg-yellow-100 text-yellow-700 border-yellow-200', pick: 'bg-yellow-50 border-yellow-300 text-yellow-700' },
+  cashier: { label: 'Кассчин',  Icon: User,        badge: 'bg-blue-100 text-blue-700 border-blue-200',       pick: 'bg-blue-50 border-blue-300 text-blue-700'       },
+  cleaner: { label: 'Үйлчлэгч', Icon: Brush,       badge: 'bg-purple-100 text-purple-700 border-purple-200', pick: 'bg-purple-50 border-purple-300 text-purple-700' },
+}
+
+const RoleBadge = ({ role }) => {
+  const meta = ROLE_META[role] || ROLE_META.cashier
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border ${meta.badge}`}>
+      <meta.Icon className="w-3 h-3" /> {meta.label}
     </span>
   )
+}
 
 export default function UsersPage() {
   const [users,   setUsers]   = useState([])
@@ -371,26 +373,24 @@ function Field({ label, children }) {
 
 function RoleSelect({ value, onChange, disabled = false }) {
   return (
-    <div className="flex gap-3">
-      {['cashier', 'admin'].map(r => (
-        <button
-          key={r}
-          type="button"
-          disabled={disabled}
-          onClick={() => onChange(r)}
-          className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border text-sm font-medium transition-all
-            ${value === r
-              ? r === 'admin'
-                ? 'bg-yellow-50 border-yellow-300 text-yellow-700'
-                : 'bg-blue-50 border-blue-300 text-blue-700'
-              : 'border-gray-200 text-gray-500 hover:bg-gray-50'
-            }
-            ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-        >
-          {r === 'admin' ? <ShieldCheck className="w-4 h-4" /> : <User className="w-4 h-4" />}
-          {r === 'admin' ? 'Admin' : 'Кассчин'}
-        </button>
-      ))}
+    <div className="flex gap-2">
+      {['cashier', 'admin', 'cleaner'].map(r => {
+        const meta = ROLE_META[r]
+        return (
+          <button
+            key={r}
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(r)}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border text-sm font-medium transition-all
+              ${value === r ? meta.pick : 'border-gray-200 text-gray-500 hover:bg-gray-50'}
+              ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+          >
+            <meta.Icon className="w-4 h-4" />
+            {meta.label}
+          </button>
+        )
+      })}
     </div>
   )
 }

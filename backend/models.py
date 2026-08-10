@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, Integer, String, Float, Boolean,
-    DateTime, ForeignKey, Text, Enum, Table
+    DateTime, ForeignKey, Text, Enum, Table, Index, text as sa_text
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -152,7 +152,8 @@ class OrderItem(Base):
     order_id    = Column(Integer, ForeignKey("orders.id"), nullable=False)
     service_id  = Column(Integer, ForeignKey("services.id"), nullable=True)   # nullable: product items won't have this
     product_id  = Column(Integer, ForeignKey("inventory.id"), nullable=True)  # for sold inventory items
-    item_type   = Column(String(20), default="service")   # 'service' | 'product'
+    room_id     = Column(Integer, ForeignKey("rooms.id"), nullable=True)      # шүршүүрийн өрөө (дарааллын тасалбар үед NULL)
+    item_type   = Column(String(20), default="service")   # 'service' | 'product' | 'room'
     item_name   = Column(String(100), nullable=True)      # name snapshot at time of order
 
     quantity    = Column(Integer, default=1)
@@ -163,6 +164,7 @@ class OrderItem(Base):
     order       = relationship("Order", back_populates="items")
     service     = relationship("Service", back_populates="order_items", foreign_keys=[service_id])
     product     = relationship("InventoryItem", foreign_keys=[product_id])
+    room        = relationship("Room", foreign_keys=[room_id])
 
 
 # ── Inventory (Бараа материал) ─────────────────────────
@@ -189,7 +191,7 @@ class User(Base):
     username      = Column(String(50), unique=True, index=True, nullable=False)
     full_name     = Column(String(100), nullable=False)
     password_hash = Column(String(255), nullable=False)
-    role          = Column(String(20), default="cashier", nullable=False)   # "admin" | "cashier"
+    role          = Column(String(20), default="cashier", nullable=False)   # "admin" | "cashier" | "cleaner"
     is_active     = Column(Boolean, default=True, nullable=False)
     created_at    = Column(DateTime, server_default=func.now())
 
@@ -253,3 +255,89 @@ class MachineUsage(Base):
 
     machine       = relationship("Machine", back_populates="usages")
     order         = relationship("Order")
+
+
+# ── Шүршүүр: статусын тогтмолууд ──────────────────────────
+# waiting → reserved → in_use → awaiting_cleaning → cleaning → completed | cancelled
+# Өрөө эзэлж буй статусууд (эдгээрийн аль нэг нь байвал өрөө сул биш)
+ROOM_OCCUPYING_STATUSES = ("reserved", "in_use", "awaiting_cleaning", "cleaning")
+SESSION_ACTIVE_STATUSES = ("waiting",) + ROOM_OCCUPYING_STATUSES
+
+
+# ── RoomType (Өрөөний төрөл: 1 хүний / 2 хүний / Саун) ────
+class RoomType(Base):
+    __tablename__ = "room_types"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    name         = Column(String(100), nullable=False)           # "1 хүний"
+    price        = Column(Float, nullable=False)                 # тогтмол үнэ
+    duration_min = Column(Integer, default=60, nullable=False)   # стандарт хугацаа
+    color        = Column(String(20), default="#38bdf8")         # зураглал дээрх өнгө
+    sort_order   = Column(Integer, default=0)
+    is_active    = Column(Boolean, default=True)
+
+    rooms        = relationship("Room", back_populates="room_type")
+
+
+# ── Room (Шүршүүрийн өрөө) ────────────────────────────────
+class Room(Base):
+    __tablename__ = "rooms"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    number       = Column(String(20), unique=True, nullable=False)   # "1", "2", "A1"
+    room_type_id = Column(Integer, ForeignKey("room_types.id"), nullable=False)
+    is_active    = Column(Boolean, default=True)
+
+    # Зураглал дээрх байрлал (24×14 виртуал grid). Бүгд NULL = байрлуулаагүй
+    map_x        = Column(Integer, nullable=True)
+    map_y        = Column(Integer, nullable=True)
+    map_w        = Column(Integer, nullable=True)
+    map_h        = Column(Integer, nullable=True)
+
+    room_type    = relationship("RoomType", back_populates="rooms", lazy="joined")
+    sessions     = relationship("RoomSession", back_populates="room",
+                                foreign_keys="RoomSession.room_id")
+
+
+# ── RoomSession (Нэг худалдан авалт = нэг session) ─────────
+class RoomSession(Base):
+    __tablename__ = "room_sessions"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    room_id       = Column(Integer, ForeignKey("rooms.id"), nullable=True)         # waiting үед NULL
+    room_type_id  = Column(Integer, ForeignKey("room_types.id"), nullable=False)   # юуны төлбөр төлсөн
+    order_id      = Column(Integer, ForeignKey("orders.id"), nullable=False)
+    order_item_id = Column(Integer, ForeignKey("order_items.id"), nullable=True)
+    queue_no      = Column(Integer, nullable=False, default=0)   # өдрийн дарааллын дугаар (Ш-07)
+
+    # snapshot
+    room_number   = Column(String(20), nullable=True)     # өрөө оноогдох үед бөглөгдөнө
+    type_name     = Column(String(100), nullable=True)
+    customer_name = Column(String(100), nullable=True)
+    price         = Column(Float, nullable=False)
+    duration_min  = Column(Integer, nullable=False)
+
+    status        = Column(String(20), default="waiting", index=True)
+
+    created_at          = Column(DateTime(timezone=True), default=_now_local)  # = төлсөн цаг (FIFO)
+    started_at          = Column(DateTime(timezone=True), nullable=True)       # Эхлүүлэх
+    ended_at            = Column(DateTime(timezone=True), nullable=True)       # Гарсан / цуцлагдсан
+    cleaning_started_at = Column(DateTime(timezone=True), nullable=True)
+    cleaned_at          = Column(DateTime(timezone=True), nullable=True)
+    cleaned_by_id       = Column(Integer, ForeignKey("users.id"), nullable=True)
+    cleaned_by          = Column(String(100), nullable=True)
+
+    room       = relationship("Room", back_populates="sessions", foreign_keys=[room_id])
+    room_type  = relationship("RoomType")
+    order      = relationship("Order")
+
+    # Нэг өрөөнд зэрэг ганцхан идэвхтэй session — давхар захиалгын хамгаалалт
+    __table_args__ = (
+        Index(
+            "ux_room_sessions_active_room", "room_id", unique=True,
+            sqlite_where=sa_text(
+                "status IN ('reserved','in_use','awaiting_cleaning','cleaning') "
+                "AND room_id IS NOT NULL"
+            ),
+        ),
+    )

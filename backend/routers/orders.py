@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_, and_, func
+from sqlalchemy import or_, and_, func, case
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 from datetime import datetime, date, timezone, timedelta
 
@@ -11,7 +12,11 @@ def _now_local():
     return datetime.now(_LOCAL_TZ)
 
 from database import get_db
-from models import Order, OrderItem, Service, Customer, Coupon, InventoryItem
+from models import (
+    Order, OrderItem, Service, Customer, Coupon, InventoryItem,
+    Room, RoomType, RoomSession,
+    ROOM_OCCUPYING_STATUSES, SESSION_ACTIVE_STATUSES,
+)
 from schemas import (
     OrderCreate, OrderItemCreate, OrderOut, OrderStatusUpdate, OrderPayRequest,
     OrderFlagRequest, CouponValidate, CouponOut, CouponCreate
@@ -103,8 +108,17 @@ def get_queue(db: Session = Depends(get_db)):
 
     Анхааруулгын жагсаалтад орсон захиалга ч дараалалд хэвээр үлдэж, бэлэн болсон /
     олгосон төлөв рүү шилжинэ. Зөвхөн төлбөрийн байдал нь тусад нь тэмдэглэгдэнэ.
+
+    Шүршүүрийн захиалга энд харагдахгүй — өрөөний дараалал болон төлөв нь
+    Шүршүүр цэсэн дээр тусдаа удирдагдана.
     """
     today_start = _now_local().replace(hour=0, minute=0, second=0, microsecond=0)
+    # Зөвхөн шүршүүрээс бүрдсэн захиалгууд (угаалгын үйлчилгээгүй) — эдгээрийг хасна
+    shower_only = (
+        db.query(OrderItem.order_id)
+        .group_by(OrderItem.order_id)
+        .having(func.sum(case((OrderItem.item_type != "room", 1), else_=0)) == 0)
+    )
     return (
         db.query(Order)
         .options(
@@ -114,6 +128,7 @@ def get_queue(db: Session = Depends(get_db)):
         )
         .filter(
             Order.status.notin_(["archived", "deleted"]),
+            Order.id.notin_(shower_only),
             or_(
                 Order.status != "delivered",
                 and_(Order.status == "delivered", Order.delivered_at >= today_start)
@@ -270,14 +285,75 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db), current_us
     if not payload.items:
         raise HTTPException(status_code=400, detail="Хоосон захиалга болохгүй")
 
+    # Шүршүүрийг зөвхөн урьдчилж төлсөн үед л зарна
+    has_shower = any(i.room_id or i.room_type_id for i in payload.items)
+    if has_shower and payload.payment_method.value == "unpaid":
+        raise HTTPException(
+            status_code=400,
+            detail="Шүршүүрийн захиалгад «Дараа төлөх» боломжгүй. Төлбөрөө эхэлж төлнө үү."
+        )
+
     # 1. Subtotal тооцоолох
     subtotal = 0.0
     item_rows = []
+    seen_room_ids = set()
+    pending_sessions = []   # (item_rows индекс, "room"|"ticket", room, room_type, тоо)
     for item in payload.items:
-        if not item.service_id and not item.product_id:
-            raise HTTPException(status_code=400, detail="service_id эсвэл product_id заавал байх ёстой")
+        if not item.service_id and not item.product_id and not item.room_id and not item.room_type_id:
+            raise HTTPException(
+                status_code=400,
+                detail="service_id, product_id, room_id эсвэл room_type_id заавал байх ёстой"
+            )
 
-        if item.service_id:
+        if item.room_id:
+            # ── Шүршүүр: тодорхой өрөө ──────────────────────
+            room = db.query(Room).filter(Room.id == item.room_id, Room.is_active == True).first()
+            if not room:
+                raise HTTPException(status_code=404, detail="Өрөө олдсонгүй")
+            if room.id in seen_room_ids:
+                raise HTTPException(status_code=400, detail=f"Өрөө №{room.number} давхардсан байна")
+            occupied = db.query(RoomSession).filter(
+                RoomSession.room_id == room.id,
+                RoomSession.status.in_(ROOM_OCCUPYING_STATUSES),
+            ).first()
+            if occupied:
+                raise HTTPException(status_code=400, detail=f"Өрөө №{room.number} сул биш байна")
+            seen_room_ids.add(room.id)
+
+            rt = room.room_type
+            if not rt:
+                raise HTTPException(status_code=404, detail="Өрөөний төрөл олдсонгүй")
+            subtotal += rt.price
+            pending_sessions.append((len(item_rows), "room", room, rt, 1))
+            item_rows.append(OrderItem(
+                room_id     = room.id,
+                item_type   = "room",
+                item_name   = f"Шүршүүр №{room.number} — {rt.name}",
+                quantity    = 1,
+                unit_price  = rt.price,
+                total_price = rt.price,
+                notes       = item.notes
+            ))
+        elif item.room_type_id:
+            # ── Шүршүүр: дарааллын тасалбар (өрөөгүй) ────────
+            rt = db.query(RoomType).filter(
+                RoomType.id == item.room_type_id, RoomType.is_active == True
+            ).first()
+            if not rt:
+                raise HTTPException(status_code=404, detail="Өрөөний төрөл олдсонгүй")
+            qty = max(1, item.quantity)
+            line_total = rt.price * qty
+            subtotal += line_total
+            pending_sessions.append((len(item_rows), "ticket", None, rt, qty))
+            item_rows.append(OrderItem(
+                item_type   = "room",
+                item_name   = f"Шүршүүр — {rt.name} (дараалал)",
+                quantity    = qty,
+                unit_price  = rt.price,
+                total_price = line_total,
+                notes       = item.notes
+            ))
+        elif item.service_id:
             # ── Үйлчилгээ ──────────────────────────────────
             svc = db.query(Service).filter(
                 Service.id == item.service_id, Service.is_active == True
@@ -378,7 +454,47 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db), current_us
     order.items = item_rows
     db.add(order)
 
-    # 6. Үйлчлүүлэгчийн оноо шинэчлэх (зөвхөн төлбөр төлсөн үед)
+    # 6. Шүршүүрийн session үүсгэх (өрөө эзэмших / дараалалд орох)
+    if pending_sessions:
+        db.flush()   # order.id болон item_rows[i].id гаргаж авах
+
+        cust_name = None
+        if payload.customer_id:
+            c = db.query(Customer).filter(Customer.id == payload.customer_id).first()
+            cust_name = c.name if c else None
+        customer_snapshot = cust_name or payload.phone or "—"
+
+        # Дарааллын дугаар — өрөөний ТӨРӨЛ бүрээр тусдаа, өдөр бүр 001-ээс эхэлнэ
+        day_start = _now_local().replace(hour=0, minute=0, second=0, microsecond=0)
+        type_counters = {}
+
+        def _next_queue_no(type_id: int) -> int:
+            if type_id not in type_counters:
+                type_counters[type_id] = (db.query(func.max(RoomSession.queue_no)).filter(
+                    RoomSession.room_type_id == type_id,
+                    RoomSession.created_at >= day_start,
+                ).scalar() or 0)
+            type_counters[type_id] += 1
+            return type_counters[type_id]
+
+        for idx, kind, room, rt, qty in pending_sessions:
+            for _ in range(qty):
+                next_no = _next_queue_no(rt.id)
+                db.add(RoomSession(
+                    room_id       = room.id if kind == "room" else None,
+                    room_type_id  = rt.id,
+                    order_id      = order.id,
+                    order_item_id = item_rows[idx].id,
+                    queue_no      = next_no,
+                    room_number   = room.number if kind == "room" else None,
+                    type_name     = rt.name,
+                    customer_name = customer_snapshot,
+                    price         = rt.price,
+                    duration_min  = rt.duration_min,
+                    status        = "reserved" if kind == "room" else "waiting",
+                ))
+
+    # 7. Үйлчлүүлэгчийн оноо шинэчлэх (зөвхөн төлбөр төлсөн үед)
     if not is_unpaid and payload.customer_id:
         customer = db.query(Customer).filter(Customer.id == payload.customer_id).first()
         if customer:
@@ -386,7 +502,14 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db), current_us
             customer.total_spent += total
             customer.total_spent += total
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Өрөө сул биш байна (зэрэг захиалга). Дахин оролдоно уу."
+        )
     db.refresh(order)
 
     # eager load for response
@@ -601,6 +724,13 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
             prod = db.query(InventoryItem).filter(InventoryItem.id == item.product_id).first()
             if prod:
                 prod.quantity += item.quantity
+    # Шүршүүрийн session-уудыг цуцлах (өрөө суларна, дарааллаас хасагдана)
+    for s in db.query(RoomSession).filter(
+        RoomSession.order_id == o.id,
+        RoomSession.status.in_(SESSION_ACTIVE_STATUSES),
+    ).all():
+        s.status = "cancelled"
+        s.ended_at = _now_local()
     # Soft delete
     o.status = "deleted"
     o.deleted_at = _now_local()

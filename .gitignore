@@ -10,8 +10,12 @@
 *.db-journal
 *.db-wal
 *.db-shm
+*.db.bak*
 *.sqlite
 *.sqlite3
+
+# ── Claude Code локал тохиргоо ──────────────────────────
+.claude/settings.local.json
 
 # ── Python ──────────────────────────────────────────────
 venv/

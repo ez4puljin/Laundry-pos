@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react'
-import { Plus, Edit2, Trash2, AlertTriangle, ToggleLeft, ToggleRight, Package, Wrench, Tag, Settings, Ticket, MessageSquare, Star, Receipt } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Plus, Edit2, Trash2, AlertTriangle, ToggleLeft, ToggleRight, Package, Wrench, Tag, Settings, Ticket, MessageSquare, Star, Receipt, ShowerHead, DoorOpen, Save, Eraser, MousePointerClick } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { servicesApi, inventoryApi, categoriesApi, machinesApi, ordersApi, settingsApi } from '../api/client'
+import { servicesApi, inventoryApi, categoriesApi, machinesApi, ordersApi, settingsApi, roomsApi, roomTypesApi } from '../api/client'
+import { GRID_COLS, GRID_ROWS } from '../components/RoomMap'
 
 const MACHINE_TYPE_OPTIONS = [
   { value: 'washer',      label: 'Угаалга' },
@@ -45,6 +46,10 @@ export default function ManagePage() {
           icon={<Tag className="w-3.5 h-3.5" />} label="Ангилал" />
         <TabBtn active={tab === 'machines'} onClick={() => setTab('machines')}
           icon={<Settings className="w-3.5 h-3.5" />} label="Машин" />
+        <TabBtn active={tab === 'roomtypes'} onClick={() => setTab('roomtypes')}
+          icon={<DoorOpen className="w-3.5 h-3.5" />} label="Өрөөний төрөл" />
+        <TabBtn active={tab === 'rooms'} onClick={() => setTab('rooms')}
+          icon={<ShowerHead className="w-3.5 h-3.5" />} label="Шүршүүр" />
         <TabBtn active={tab === 'coupons'} onClick={() => setTab('coupons')}
           icon={<Ticket className="w-3.5 h-3.5" />} label="Купон" />
         <TabBtn active={tab === 'points'} onClick={() => setTab('points')}
@@ -61,6 +66,8 @@ export default function ManagePage() {
         {tab === 'inventory'  && <InventoryTab />}
         {tab === 'categories' && <CategoriesTab categories={categories} onRefresh={loadCategories} />}
         {tab === 'machines'   && <MachinesTab />}
+        {tab === 'roomtypes'  && <RoomTypesTab />}
+        {tab === 'rooms'      && <RoomsTab />}
         {tab === 'coupons'    && <CouponsTab />}
         {tab === 'points'     && <PointsTab />}
         {tab === 'receipt'    && <ReceiptTab />}
@@ -1268,6 +1275,523 @@ function Field({ label, children }) {
     <div>
       <label className="block text-xs font-semibold text-gray-500 mb-1.5">{label}</label>
       {children}
+    </div>
+  )
+}
+
+
+// ══════════════════════════════════════════════════════════
+//  RoomTypesTab – Шүршүүрийн өрөөний төрөл
+// ══════════════════════════════════════════════════════════
+const ROOM_COLOR_PRESETS = ['#38bdf8', '#a78bfa', '#fb923c', '#34d399', '#f472b6', '#facc15']
+
+function RoomTypesTab() {
+  const [rows, setRows]         = useState([])
+  const [showModal, setShow]    = useState(false)
+  const [editing, setEditing]   = useState(null)
+  const [form, setForm]         = useState({ name: '', price: '', duration_min: '60', color: ROOM_COLOR_PRESETS[0], sort_order: '0' })
+
+  const fetch = () => roomTypesApi.list({ active_only: false }).then(r => setRows(r.data)).catch(() => {})
+  useEffect(() => { fetch() }, [])
+
+  const openCreate = () => {
+    setEditing(null)
+    setForm({ name: '', price: '', duration_min: '60', color: ROOM_COLOR_PRESETS[0], sort_order: String(rows.length) })
+    setShow(true)
+  }
+
+  const openEdit = (row) => {
+    setEditing(row)
+    setForm({
+      name: row.name, price: String(row.price), duration_min: String(row.duration_min),
+      color: row.color, sort_order: String(row.sort_order),
+    })
+    setShow(true)
+  }
+
+  const handleSubmit = async () => {
+    if (!form.name.trim())          return toast.error('Нэр оруулна уу')
+    if (!parseFloat(form.price))    return toast.error('Үнэ оруулна уу')
+    const data = {
+      name: form.name.trim(),
+      price: parseFloat(form.price),
+      duration_min: parseInt(form.duration_min) || 60,
+      color: form.color,
+      sort_order: parseInt(form.sort_order) || 0,
+    }
+    try {
+      if (editing) { await roomTypesApi.update(editing.id, data); toast.success('Төрөл шинэчлэгдлээ') }
+      else         { await roomTypesApi.create(data);             toast.success('Төрөл нэмэгдлээ')    }
+      setShow(false); fetch()
+    } catch { /* interceptor toast */ }
+  }
+
+  const handleToggle = async (row) => {
+    try { await roomTypesApi.update(row.id, { is_active: !row.is_active }); fetch() } catch {}
+  }
+
+  const handleDelete = async (row) => {
+    if (!confirm(`"${row.name}" төрлийг устгах уу?`)) return
+    try { await roomTypesApi.remove(row.id); toast.success('Устгагдлаа'); fetch() } catch {}
+  }
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="font-bold text-gray-800">Өрөөний төрөл</h2>
+          <p className="text-xs text-gray-500">{rows.length} төрөл · үнэ ба стандарт хугацаа</p>
+        </div>
+        <button onClick={openCreate}
+          className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2
+                     rounded-xl text-sm font-medium">
+          <Plus className="w-4 h-4" /> Төрөл нэмэх
+        </button>
+      </div>
+
+      <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
+        {rows.length === 0 && (
+          <div className="p-8 text-center text-sm text-gray-400">Төрөл алга. Эхний төрлөө нэмнэ үү.</div>
+        )}
+
+        {/* Mobile */}
+        <div className="md:hidden divide-y">
+          {rows.map(row => (
+            <div key={row.id} className="p-3 flex items-center gap-3">
+              <span className="w-3 h-8 rounded-full shrink-0" style={{ background: row.color }} />
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-gray-800 text-sm truncate">{row.name}</p>
+                <p className="text-xs text-gray-500">
+                  {row.price.toLocaleString()}₮ · {row.duration_min}мин
+                  {!row.is_active && <span className="text-gray-400"> · Идэвхгүй</span>}
+                </p>
+              </div>
+              <RowActions row={row} onToggle={handleToggle} onEdit={openEdit} onDelete={handleDelete} />
+            </div>
+          ))}
+        </div>
+
+        {/* Desktop */}
+        <div className="hidden md:block overflow-x-auto">
+          {rows.length > 0 && (
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-xs text-gray-500">
+                <tr>
+                  <th className="text-left px-4 py-2.5 font-semibold">Нэр</th>
+                  <th className="text-left px-4 py-2.5 font-semibold">Үнэ</th>
+                  <th className="text-left px-4 py-2.5 font-semibold">Хугацаа</th>
+                  <th className="text-left px-4 py-2.5 font-semibold">Өнгө</th>
+                  <th className="text-left px-4 py-2.5 font-semibold">Статус</th>
+                  <th className="px-4 py-2.5" />
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {rows.map(row => (
+                  <tr key={row.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-2.5 font-medium text-gray-800">{row.name}</td>
+                    <td className="px-4 py-2.5">{row.price.toLocaleString()}₮</td>
+                    <td className="px-4 py-2.5 text-gray-500">{row.duration_min} мин</td>
+                    <td className="px-4 py-2.5">
+                      <span className="inline-block w-5 h-5 rounded-full border" style={{ background: row.color }} />
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${row.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                        {row.is_active ? 'Идэвхтэй' : 'Идэвхгүй'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      <RowActions row={row} onToggle={handleToggle} onEdit={openEdit} onDelete={handleDelete} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      {showModal && (
+        <Modal
+          title={editing ? 'Төрөл засах' : 'Шинэ төрөл нэмэх'}
+          onClose={() => setShow(false)}
+          onSubmit={handleSubmit}
+          submitLabel={editing ? 'Хадгалах' : 'Нэмэх'}
+        >
+          <Field label="Нэр *">
+            <input className="input" placeholder="2 хүний" value={form.name}
+              onChange={e => setForm({ ...form, name: e.target.value })} />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Үнэ (₮) *">
+              <input className="input" type="number" placeholder="8000" value={form.price}
+                onChange={e => setForm({ ...form, price: e.target.value })} />
+            </Field>
+            <Field label="Хугацаа (мин)">
+              <input className="input" type="number" value={form.duration_min}
+                onChange={e => setForm({ ...form, duration_min: e.target.value })} />
+            </Field>
+          </div>
+          <Field label="Өнгө">
+            <div className="flex gap-2 flex-wrap">
+              {ROOM_COLOR_PRESETS.map(c => (
+                <button key={c} type="button" onClick={() => setForm({ ...form, color: c })}
+                  className={`w-9 h-9 rounded-xl border-2 transition-all
+                              ${form.color === c ? 'border-gray-800 scale-110' : 'border-transparent'}`}
+                  style={{ background: c }} />
+              ))}
+            </div>
+          </Field>
+          <Field label="Эрэмбэ">
+            <input className="input" type="number" value={form.sort_order}
+              onChange={e => setForm({ ...form, sort_order: e.target.value })} />
+          </Field>
+        </Modal>
+      )}
+    </div>
+  )
+}
+
+function RowActions({ row, onToggle, onEdit, onDelete }) {
+  return (
+    <div className="flex items-center gap-1 shrink-0">
+      <button onClick={() => onToggle(row)} className="p-1.5 rounded-lg hover:bg-gray-100"
+        title={row.is_active ? 'Идэвхгүй болгох' : 'Идэвхжүүлэх'}>
+        {row.is_active
+          ? <ToggleRight className="w-4 h-4 text-green-600" />
+          : <ToggleLeft className="w-4 h-4 text-gray-400" />}
+      </button>
+      <button onClick={() => onEdit(row)} className="p-1.5 rounded-lg hover:bg-gray-100" title="Засах">
+        <Edit2 className="w-4 h-4 text-gray-500" />
+      </button>
+      <button onClick={() => onDelete(row)} className="p-1.5 rounded-lg hover:bg-red-50" title="Устгах">
+        <Trash2 className="w-4 h-4 text-red-500" />
+      </button>
+    </div>
+  )
+}
+
+
+// ══════════════════════════════════════════════════════════
+//  RoomsTab – Өрөө + зураглалын editor
+// ══════════════════════════════════════════════════════════
+const overlaps = (a, b) =>
+  a.map_x < b.map_x + b.map_w && b.map_x < a.map_x + a.map_w &&
+  a.map_y < b.map_y + b.map_h && b.map_y < a.map_y + a.map_h
+
+function RoomsTab() {
+  const [rooms, setRooms]     = useState([])
+  const [types, setTypes]     = useState([])
+  const [showModal, setShow]  = useState(false)
+  const [editing, setEditing] = useState(null)
+  const [form, setForm]       = useState({ number: '', room_type_id: '' })
+
+  // Зураглалын төлөв
+  const [layout, setLayout]   = useState([])
+  const [selectedId, setSel]  = useState(null)
+  const [drag, setDrag]       = useState(null)
+  const [dirty, setDirty]     = useState(false)
+  const gridRef = useRef(null)
+
+  const fetch = () =>
+    roomsApi.list().then(r => {
+      setRooms(r.data)
+      setLayout(r.data.map(x => ({ ...x })))
+      setDirty(false)
+    }).catch(() => {})
+
+  useEffect(() => {
+    fetch()
+    roomTypesApi.list({ active_only: true }).then(r => setTypes(r.data)).catch(() => {})
+  }, [])
+
+  // ── CRUD ──
+  const openCreate = () => {
+    if (types.length === 0) return toast.error('Эхлээд өрөөний төрөл нэмнэ үү')
+    setEditing(null)
+    setForm({ number: '', room_type_id: String(types[0].id) })
+    setShow(true)
+  }
+
+  const openEdit = (row) => {
+    setEditing(row)
+    setForm({ number: row.number, room_type_id: String(row.room_type_id) })
+    setShow(true)
+  }
+
+  const handleSubmit = async () => {
+    if (!form.number.trim())    return toast.error('Өрөөний дугаар оруулна уу')
+    if (!form.room_type_id)     return toast.error('Төрөл сонгоно уу')
+    const data = { number: form.number.trim(), room_type_id: parseInt(form.room_type_id) }
+    try {
+      if (editing) { await roomsApi.update(editing.id, data); toast.success('Өрөө шинэчлэгдлээ') }
+      else         { await roomsApi.create(data);             toast.success('Өрөө нэмэгдлээ')    }
+      setShow(false); fetch()
+    } catch {}
+  }
+
+  const handleToggle = async (row) => {
+    try { await roomsApi.update(row.id, { is_active: !row.is_active }); fetch() } catch {}
+  }
+
+  const handleDelete = async (row) => {
+    if (!confirm(`Өрөө №${row.number}-г устгах уу?`)) return
+    try { await roomsApi.remove(row.id); toast.success('Устгагдлаа'); fetch() } catch {}
+  }
+
+  // ── Зураглал: нүд тооцоолол ──
+  const cellOf = (e) => {
+    const rect = gridRef.current.getBoundingClientRect()
+    const px = (e.touches?.[0]?.clientX ?? e.clientX) - rect.left
+    const py = (e.touches?.[0]?.clientY ?? e.clientY) - rect.top
+    return {
+      col: Math.min(GRID_COLS - 1, Math.max(0, Math.floor(px / (rect.width  / GRID_COLS)))),
+      row: Math.min(GRID_ROWS - 1, Math.max(0, Math.floor(py / (rect.height / GRID_ROWS)))),
+    }
+  }
+
+  const onDown = (e) => {
+    if (!selectedId) return toast('Эхлээд өрөө сонгоно уу', { id: 'sel-room' })
+    const c = cellOf(e)
+    setDrag({ startCol: c.col, startRow: c.row, curCol: c.col, curRow: c.row })
+  }
+
+  const onMove = (e) => {
+    if (!drag) return
+    const c = cellOf(e)
+    setDrag(d => ({ ...d, curCol: c.col, curRow: c.row }))
+  }
+
+  const onUp = () => {
+    if (!drag || !selectedId) { setDrag(null); return }
+    const rect = {
+      map_x: Math.min(drag.startCol, drag.curCol),
+      map_y: Math.min(drag.startRow, drag.curRow),
+      map_w: Math.abs(drag.curCol - drag.startCol) + 1,
+      map_h: Math.abs(drag.curRow - drag.startRow) + 1,
+    }
+    const others = layout.filter(r => r.id !== selectedId && r.map_x != null && r.map_w > 0)
+    if (others.some(o => overlaps(rect, o))) {
+      toast.error('Өрөөнүүд давхцаж болохгүй')
+      setDrag(null)
+      return
+    }
+    setLayout(l => l.map(r => r.id === selectedId ? { ...r, ...rect } : r))
+    setDirty(true)
+    setDrag(null)
+  }
+
+  const clearPlacement = (id) => {
+    setLayout(l => l.map(r => r.id === id ? { ...r, map_x: null, map_y: null, map_w: null, map_h: null } : r))
+    setDirty(true)
+  }
+
+  const saveLayout = async () => {
+    try {
+      await roomsApi.saveLayout(layout.map(r => ({
+        id: r.id, map_x: r.map_x, map_y: r.map_y, map_w: r.map_w, map_h: r.map_h,
+      })))
+      toast.success('Зураглал хадгалагдлаа')
+      fetch()
+    } catch {}
+  }
+
+  const typeOf = (id) => types.find(t => t.id === id)
+  const dragRect = drag && {
+    x: Math.min(drag.startCol, drag.curCol),
+    y: Math.min(drag.startRow, drag.curRow),
+    w: Math.abs(drag.curCol - drag.startCol) + 1,
+    h: Math.abs(drag.curRow - drag.startRow) + 1,
+  }
+
+  return (
+    <div className="p-4 space-y-5">
+      {/* ── Өрөөний жагсаалт ── */}
+      <div>
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <h2 className="font-bold text-gray-800">Шүршүүрийн өрөө</h2>
+            <p className="text-xs text-gray-500">
+              {rooms.length} өрөө · {layout.filter(r => r.map_x != null).length} байрлуулсан
+            </p>
+          </div>
+          <button onClick={openCreate}
+            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2
+                       rounded-xl text-sm font-medium">
+            <Plus className="w-4 h-4" /> Өрөө нэмэх
+          </button>
+        </div>
+
+        <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
+          {rooms.length === 0 ? (
+            <div className="p-8 text-center text-sm text-gray-400">
+              Өрөө алга. {types.length === 0 && 'Эхлээд «Өрөөний төрөл» табаас төрөл нэмнэ үү.'}
+            </div>
+          ) : (
+            <div className="divide-y">
+              {rooms.map(row => {
+                const placed = layout.find(l => l.id === row.id)?.map_x != null
+                return (
+                  <div key={row.id} className="p-3 flex items-center gap-3">
+                    <span className="w-3 h-8 rounded-full shrink-0"
+                      style={{ background: typeOf(row.room_type_id)?.color || '#cbd5e1' }} />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-gray-800 text-sm">№{row.number}</p>
+                      <p className="text-xs text-gray-500 truncate">
+                        {row.room_type?.name || '—'}
+                        {!row.is_active && <span className="text-gray-400"> · Идэвхгүй</span>}
+                      </p>
+                    </div>
+                    <span className={`text-xs px-2 py-0.5 rounded-full shrink-0
+                                      ${placed ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}`}>
+                      {placed ? 'Байрлуулсан' : 'Байрлуулаагүй'}
+                    </span>
+                    <RowActions row={row} onToggle={handleToggle} onEdit={openEdit} onDelete={handleDelete} />
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Зураглалын editor ── */}
+      {rooms.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+            <div>
+              <h2 className="font-bold text-gray-800">Зураглал</h2>
+              <p className="text-xs text-gray-500 flex items-center gap-1">
+                <MousePointerClick className="w-3 h-3" />
+                Өрөө сонгоод торон дээр чирж тэгш өнцөгт зурна
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={fetch} disabled={!dirty}
+                className="px-3 py-2 rounded-xl border border-gray-200 text-sm text-gray-600
+                           hover:bg-gray-50 disabled:opacity-40">
+                Болих
+              </button>
+              <button onClick={saveLayout} disabled={!dirty}
+                className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2
+                           rounded-xl text-sm font-medium disabled:opacity-40">
+                <Save className="w-4 h-4" /> Хадгалах
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+            {/* Өрөө сонгох жагсаалт */}
+            <div className="lg:col-span-1 bg-white rounded-2xl border p-3 space-y-1.5 max-h-[420px] overflow-y-auto">
+              <p className="text-xs font-semibold text-gray-500 mb-1">Өрөө сонгох</p>
+              {layout.map(r => {
+                const placed = r.map_x != null
+                return (
+                  <div key={r.id} className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => setSel(selectedId === r.id ? null : r.id)}
+                      className={`flex-1 text-left px-3 py-2 rounded-xl text-sm transition-all border
+                                  ${selectedId === r.id
+                                    ? 'border-blue-500 bg-blue-50 text-blue-700 font-semibold'
+                                    : 'border-gray-200 hover:bg-gray-50'}`}
+                    >
+                      <span>№{r.number}</span>
+                      {!placed && <span className="text-xs text-amber-600 ml-1.5">байрлуулаагүй</span>}
+                    </button>
+                    {placed && (
+                      <button onClick={() => clearPlacement(r.id)} title="Байршил арилгах"
+                        className="p-1.5 rounded-lg hover:bg-red-50">
+                        <Eraser className="w-4 h-4 text-gray-400" />
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Grid */}
+            <div className="lg:col-span-3">
+              <div
+                ref={gridRef}
+                onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={() => setDrag(null)}
+                onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
+                className={`relative w-full rounded-xl border-2 bg-gray-50 overflow-hidden select-none touch-none
+                            ${selectedId ? 'border-blue-300 cursor-crosshair' : 'border-gray-200'}`}
+                style={{
+                  aspectRatio: `${GRID_COLS} / ${GRID_ROWS}`,
+                  backgroundImage:
+                    `linear-gradient(to right,  rgba(0,0,0,.07) 1px, transparent 1px),
+                     linear-gradient(to bottom, rgba(0,0,0,.07) 1px, transparent 1px)`,
+                  backgroundSize: `${100 / GRID_COLS}% ${100 / GRID_ROWS}%`,
+                }}
+              >
+                {layout.filter(r => r.map_x != null && r.map_w > 0).map(r => (
+                  <div
+                    key={r.id}
+                    style={{
+                      left:   `${(r.map_x / GRID_COLS) * 100}%`,
+                      top:    `${(r.map_y / GRID_ROWS) * 100}%`,
+                      width:  `${(r.map_w / GRID_COLS) * 100}%`,
+                      height: `${(r.map_h / GRID_ROWS) * 100}%`,
+                      background: `${typeOf(r.room_type_id)?.color || '#cbd5e1'}22`,
+                      borderColor: typeOf(r.room_type_id)?.color || '#cbd5e1',
+                    }}
+                    className={`absolute rounded-lg border-2 flex flex-col items-center justify-center
+                                text-xs font-bold text-gray-700 overflow-hidden
+                                ${selectedId === r.id ? 'ring-2 ring-blue-500 ring-offset-1' : ''}`}
+                  >
+                    <span>№{r.number}</span>
+                    <span className="text-[10px] font-normal text-gray-500 truncate max-w-full px-1">
+                      {r.room_type?.name}
+                    </span>
+                  </div>
+                ))}
+
+                {dragRect && (
+                  <div
+                    style={{
+                      left:   `${(dragRect.x / GRID_COLS) * 100}%`,
+                      top:    `${(dragRect.y / GRID_ROWS) * 100}%`,
+                      width:  `${(dragRect.w / GRID_COLS) * 100}%`,
+                      height: `${(dragRect.h / GRID_ROWS) * 100}%`,
+                    }}
+                    className="absolute rounded-lg border-2 border-dashed border-blue-500 bg-blue-500/10 pointer-events-none"
+                  />
+                )}
+
+                {!selectedId && (
+                  <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-400 pointer-events-none">
+                    Зүүн талаас өрөө сонгоно уу
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showModal && (
+        <Modal
+          title={editing ? 'Өрөө засах' : 'Шинэ өрөө нэмэх'}
+          onClose={() => setShow(false)}
+          onSubmit={handleSubmit}
+          submitLabel={editing ? 'Хадгалах' : 'Нэмэх'}
+        >
+          <Field label="Өрөөний дугаар *">
+            <input className="input" placeholder="1" value={form.number}
+              onChange={e => setForm({ ...form, number: e.target.value })} />
+          </Field>
+          <Field label="Төрөл *">
+            <select className="input" value={form.room_type_id}
+              onChange={e => setForm({ ...form, room_type_id: e.target.value })}>
+              {types.map(t => (
+                <option key={t.id} value={t.id}>
+                  {t.name} — {t.price.toLocaleString()}₮ / {t.duration_min}мин
+                </option>
+              ))}
+            </select>
+          </Field>
+        </Modal>
+      )}
     </div>
   )
 }
