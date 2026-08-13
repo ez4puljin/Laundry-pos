@@ -173,6 +173,29 @@ export const roomsApi = {
   cancelTicket:  (sid)      => api.post(`/room-sessions/${sid}/cancel`),
 }
 
+// ── Санхүү (зөвхөн админ) ─────────────────────────────────
+export const financeApi = {
+  accounts:       (params = {}) => api.get('/finance/accounts', { params }),
+  createAccount:  (d)     => api.post('/finance/accounts', d),
+  updateAccount:  (id, d) => api.put(`/finance/accounts/${id}`, d),
+  removeAccount:  (id)    => api.delete(`/finance/accounts/${id}`),
+  suppliers:      (params = {}) => api.get('/finance/suppliers', { params }),
+  createSupplier: (d)     => api.post('/finance/suppliers', d),
+  updateSupplier: (id, d) => api.put(`/finance/suppliers/${id}`, d),
+  removeSupplier: (id)    => api.delete(`/finance/suppliers/${id}`),
+  purchases:      (params = {}) => api.get('/finance/purchases', { params }),
+  createPurchase: (d)     => api.post('/finance/purchases', d),
+  removePurchase: (id)    => api.delete(`/finance/purchases/${id}`),
+  debts:          (params = {}) => api.get('/finance/debts', { params }),
+  createDebt:     (d)     => api.post('/finance/debts', d),
+  payDebt:        (id, d) => api.post(`/finance/debts/${id}/pay`, d),
+  removeDebt:     (id)    => api.delete(`/finance/debts/${id}`),
+  transactions:   (params = {}) => api.get('/finance/transactions', { params }),
+  createTx:       (d)     => api.post('/finance/transactions', d),
+  removeTx:       (id)    => api.delete(`/finance/transactions/${id}`),
+  summary:        (params = {}) => api.get('/finance/summary', { params }),
+}
+
 // ── Settings ──────────────────────────────────────────────
 export const settingsApi = {
   getSms:       ()     => api.get('/settings/sms'),

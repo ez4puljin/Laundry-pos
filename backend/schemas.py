@@ -578,3 +578,192 @@ class RoomOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ═══════════════════════════════════════════════════════════
+#  Санхүү
+# ═══════════════════════════════════════════════════════════
+
+# ── Мөнгөн данс ────────────────────────────────────────────
+class FinAccountCreate(BaseModel):
+    name:         str
+    sort_order:   int = 0
+    pos_cash:     bool = False
+    pos_transfer: bool = False
+    pos_card:     bool = False
+
+
+class FinAccountUpdate(BaseModel):
+    name:         Optional[str]  = None
+    sort_order:   Optional[int]  = None
+    is_active:    Optional[bool] = None
+    pos_cash:     Optional[bool] = None
+    pos_transfer: Optional[bool] = None
+    pos_card:     Optional[bool] = None
+
+
+class FinAccountOut(BaseModel):
+    id:           int
+    name:         str
+    sort_order:   int
+    is_active:    bool
+    pos_cash:     bool
+    pos_transfer: bool
+    pos_card:     bool
+    balance:      float = 0.0   # тооцоолсон
+
+    class Config:
+        from_attributes = True
+
+
+# ── Нийлүүлэгч ─────────────────────────────────────────────
+class SupplierCreate(BaseModel):
+    name:  str
+    phone: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class SupplierUpdate(BaseModel):
+    name:      Optional[str]  = None
+    phone:     Optional[str]  = None
+    notes:     Optional[str]  = None
+    is_active: Optional[bool] = None
+
+
+class SupplierOut(BaseModel):
+    id:              int
+    name:            str
+    phone:           Optional[str]
+    notes:           Optional[str]
+    is_active:       bool
+    payable_balance: float = 0.0   # нээлттэй өглөгийн үлдэгдэл (тооцоолсон)
+
+    class Config:
+        from_attributes = True
+
+
+# ── Худалдан авалт ─────────────────────────────────────────
+class PurchaseItemCreate(BaseModel):
+    product_id: int
+    location:   Optional[str] = None
+    quantity:   float
+    unit_cost:  float
+
+
+class PurchaseItemOut(BaseModel):
+    id:         int
+    product_id: int
+    item_name:  Optional[str]
+    location:   Optional[str]
+    quantity:   float
+    unit_cost:  float
+    total:      float
+
+    class Config:
+        from_attributes = True
+
+
+class PurchaseCreate(BaseModel):
+    doc_date:     Optional[str] = None    # YYYY-MM-DD (хоосон бол өнөөдөр)
+    supplier_id:  Optional[int] = None
+    description:  Optional[str] = None
+    payment_type: str = "paid"            # 'paid' | 'credit'
+    account_id:   Optional[int] = None    # paid үед заавал
+    items:        List[PurchaseItemCreate]
+
+
+class PurchaseOut(BaseModel):
+    id:            int
+    doc_number:    str
+    doc_date:      datetime
+    supplier_id:   Optional[int]
+    supplier_name: Optional[str]
+    description:   Optional[str]
+    payment_type:  str
+    account_id:    Optional[int]
+    total:         float
+    created_by:    Optional[str]
+    items:         List[PurchaseItemOut]
+
+    @field_serializer('doc_date')
+    def _ser_doc_date(self, v): return _utc_iso(v)
+
+    class Config:
+        from_attributes = True
+
+
+# ── Авлага / Өглөг ─────────────────────────────────────────
+class DebtCreate(BaseModel):
+    kind:         str                     # 'receivable' | 'payable'
+    partner_type: str = "other"           # customer | supplier | employee | other
+    partner_id:   Optional[int] = None
+    partner_name: str
+    description:  Optional[str] = None
+    amount:       float
+    doc_date:     Optional[str] = None    # YYYY-MM-DD
+
+
+class DebtPayRequest(BaseModel):
+    amount:      float
+    account_id:  int
+    doc_date:    Optional[str] = None
+    description: Optional[str] = None
+
+
+class DebtOut(BaseModel):
+    id:           int
+    kind:         str
+    partner_type: str
+    partner_id:   Optional[int]
+    partner_name: str
+    description:  Optional[str]
+    amount:       float
+    paid_amount:  float
+    status:       str
+    doc_date:     datetime
+    purchase_id:  Optional[int]
+    created_by:   Optional[str]
+    closed_at:    Optional[datetime] = None
+
+    @field_serializer('doc_date')
+    def _ser_doc_date(self, v): return _utc_iso(v)
+
+    @field_serializer('closed_at')
+    def _ser_closed_at(self, v): return _utc_iso(v)
+
+    class Config:
+        from_attributes = True
+
+
+# ── Кассын журнал ──────────────────────────────────────────
+class FinTxCreate(BaseModel):
+    direction:    str                     # 'income' | 'expense'
+    account_id:   int
+    category:     str = "Бусад"
+    partner_type: Optional[str] = None
+    partner_id:   Optional[int] = None
+    partner_name: Optional[str] = None
+    description:  Optional[str] = None
+    amount:       float
+    doc_date:     Optional[str] = None    # YYYY-MM-DD
+
+
+class FinTxOut(BaseModel):
+    id:           int
+    doc_date:     datetime
+    direction:    str
+    account_id:   int
+    category:     str
+    partner_type: Optional[str]
+    partner_name: Optional[str]
+    description:  Optional[str]
+    amount:       float
+    purchase_id:  Optional[int]
+    debt_id:      Optional[int]
+    created_by:   Optional[str]
+
+    @field_serializer('doc_date')
+    def _ser_doc_date(self, v): return _utc_iso(v)
+
+    class Config:
+        from_attributes = True

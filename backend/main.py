@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from database import engine, SessionLocal
 import models
-from routers import services, customers, orders, inventory, reports, categories, machines, settings, shifts, rooms
+from routers import services, customers, orders, inventory, reports, categories, machines, settings, shifts, rooms, finance
 from routers import users as users_router
 from auth import get_current_user, require_admin, hash_password
 
@@ -291,6 +291,13 @@ def _seed():
             db.commit()
             print("Default machines created (5)")
 
+        # ── Мөнгөн данс (санхүү) ──────────────────────────
+        if db.query(models.FinAccount).count() == 0:
+            db.add(models.FinAccount(name="Касс", sort_order=0, pos_cash=True))
+            db.add(models.FinAccount(name="Банк", sort_order=1, pos_transfer=True, pos_card=True))
+            db.commit()
+            print("Default fin accounts created (Касс, Банк)")
+
         # ── Шүршүүрийн өрөөний төрөл ──────────────────────
         # Өрөөнүүдийг seed хийхгүй — Удирдлага цэснээс зурж үүсгэнэ
         if db.query(models.RoomType).count() == 0:
@@ -366,6 +373,8 @@ app.include_router(rooms.router,          dependencies=[Depends(get_current_user
 app.include_router(rooms.sessions_router, dependencies=[Depends(get_current_user)])
 # Хүлээлгийн танхимын дэлгэц — нэвтрэлтгүй
 app.include_router(rooms.public_router)
+# Санхүү: зөвхөн админ
+app.include_router(finance.router, dependencies=[Depends(require_admin)])
 
 
 @app.get("/")
@@ -381,6 +390,10 @@ def cleanup_data():
     try:
         db.execute(text("DELETE FROM machine_usages"))
         db.execute(text("DELETE FROM room_sessions"))
+        db.execute(text("DELETE FROM fin_transactions"))
+        db.execute(text("DELETE FROM debt_entries"))
+        db.execute(text("DELETE FROM purchase_items"))
+        db.execute(text("DELETE FROM purchases"))
         db.execute(text("DELETE FROM service_machines"))
         db.execute(text("DELETE FROM order_items"))
         db.execute(text("DELETE FROM orders"))

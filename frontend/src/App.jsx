@@ -15,6 +15,7 @@ import UsersPage     from './pages/UsersPage'
 import WarningsPage  from './pages/WarningsPage'
 import RoomsPage        from './pages/RoomsPage'
 import QueueDisplayPage from './pages/QueueDisplayPage'
+import FinancePage      from './pages/FinancePage'
 
 const STAFF = ['admin', 'cashier']
 
@@ -61,6 +62,9 @@ export default function App() {
                   } />
                   <Route path="/users" element={
                     <ProtectedRoute requireAdmin><UsersPage /></ProtectedRoute>
+                  } />
+                  <Route path="/finance" element={
+                    <ProtectedRoute requireAdmin><FinancePage /></ProtectedRoute>
                   } />
                 </Routes>
               </Layout>

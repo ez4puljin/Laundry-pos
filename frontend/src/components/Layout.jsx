@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import {
   ShoppingCart, Users, LayoutDashboard,
   WashingMachine, Settings2, ClipboardList,
-  UserCog, LogOut, Clock, AlertTriangle, ShowerHead,
+  UserCog, LogOut, Clock, AlertTriangle, ShowerHead, Wallet,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import useStore     from '../store/useStore'
@@ -18,6 +18,7 @@ const ALL_NAV = [
   { to: '/warnings',  label: 'Анхааруулга',  short: 'Анхаар',    icon: AlertTriangle,   roles: ['admin', 'cashier'] },
   { to: '/customers', label: 'Үйлчлүүлэгч', short: 'Харилцагч', icon: Users,           roles: ['admin', 'cashier'] },
   { to: '/inventory', label: 'Удирдлага',    short: 'Удирдлага', icon: Settings2,       roles: ['admin'] },
+  { to: '/finance',   label: 'Санхүү',       short: 'Санхүү',    icon: Wallet,          roles: ['admin'] },
   { to: '/dashboard', label: 'Тайлан',       short: 'Тайлан',    icon: LayoutDashboard, roles: ['admin'] },
   { to: '/users',     label: 'Хэрэглэгч',   short: 'Хэрэглэгч', icon: UserCog,         roles: ['admin'] },
 ]

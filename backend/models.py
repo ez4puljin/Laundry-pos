@@ -341,3 +341,121 @@ class RoomSession(Base):
             ),
         ),
     )
+
+
+# ═══════════════════════════════════════════════════════════
+#  Санхүү (хялбаршуулсан — давхар бичилтгүй)
+# ═══════════════════════════════════════════════════════════
+
+# ── FinAccount (Мөнгөн данс: Касс, Банк …) ────────────────
+class FinAccount(Base):
+    __tablename__ = "fin_accounts"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    name         = Column(String(100), nullable=False)     # "Касс", "Хаан банк" …
+    sort_order   = Column(Integer, default=0)
+    is_active    = Column(Boolean, default=True)
+    # POS-ийн аль төлбөрийн хэлбэр энэ данс руу ордог вэ (данс бүрт нэгээс олон байж болно,
+    # харин нэг төлбөрийн хэлбэр зөвхөн нэг дансанд холбогдоно — router талд шалгана)
+    pos_cash     = Column(Boolean, default=False)
+    pos_transfer = Column(Boolean, default=False)
+    pos_card     = Column(Boolean, default=False)
+
+
+# ── Supplier (Нийлүүлэгч) ─────────────────────────────────
+class Supplier(Base):
+    __tablename__ = "suppliers"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    name       = Column(String(100), nullable=False)
+    phone      = Column(String(20), nullable=True)
+    notes      = Column(Text, nullable=True)
+    is_active  = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), default=_now_local)
+
+
+# ── PurchaseDoc (Бараа материалын орлого) ─────────────────
+class PurchaseDoc(Base):
+    __tablename__ = "purchases"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    doc_number    = Column(String(20), unique=True, index=True)   # PUR-20260810-001
+    doc_date      = Column(DateTime(timezone=True), default=_now_local)
+    supplier_id   = Column(Integer, ForeignKey("suppliers.id"), nullable=True)
+    supplier_name = Column(String(100), nullable=True)            # snapshot
+    description   = Column(Text, nullable=True)                   # гүйлгээний утга
+    payment_type  = Column(String(20), default="paid")            # 'paid' (данснаас) | 'credit' (өглөгөөр)
+    account_id    = Column(Integer, ForeignKey("fin_accounts.id"), nullable=True)  # paid үед
+    total         = Column(Float, default=0.0)
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by    = Column(String(100), nullable=True)
+    created_at    = Column(DateTime(timezone=True), default=_now_local)
+
+    supplier      = relationship("Supplier")
+    account       = relationship("FinAccount")
+    items         = relationship("PurchaseItem", back_populates="purchase",
+                                 cascade="all, delete-orphan")
+
+
+class PurchaseItem(Base):
+    __tablename__ = "purchase_items"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    purchase_id = Column(Integer, ForeignKey("purchases.id"), nullable=False)
+    product_id  = Column(Integer, ForeignKey("inventory.id"), nullable=False)
+    item_name   = Column(String(100), nullable=True)    # snapshot
+    location    = Column(String(100), nullable=True)    # байршил (агуулах г.м.)
+    quantity    = Column(Float, nullable=False)
+    unit_cost   = Column(Float, nullable=False)
+    total       = Column(Float, nullable=False)
+
+    purchase    = relationship("PurchaseDoc", back_populates="items")
+    product     = relationship("InventoryItem")
+
+
+# ── DebtEntry (Авлага / Өглөгийн тооцоо) ──────────────────
+# kind: 'receivable' = бидэнд өртэй (авлага) | 'payable' = бид өртэй (өглөг)
+class DebtEntry(Base):
+    __tablename__ = "debt_entries"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    kind          = Column(String(20), nullable=False, index=True)
+    partner_type  = Column(String(20), default="other")   # customer | supplier | employee | other
+    partner_id    = Column(Integer, nullable=True)
+    partner_name  = Column(String(100), nullable=False)
+    description   = Column(Text, nullable=True)
+    amount        = Column(Float, nullable=False)
+    paid_amount   = Column(Float, default=0.0)
+    status        = Column(String(20), default="open", index=True)   # open | closed
+    doc_date      = Column(DateTime(timezone=True), default=_now_local)
+    purchase_id   = Column(Integer, ForeignKey("purchases.id"), nullable=True)  # өглөгөөр авсан худалдан авалт
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by    = Column(String(100), nullable=True)
+    created_at    = Column(DateTime(timezone=True), default=_now_local)
+    closed_at     = Column(DateTime(timezone=True), nullable=True)
+
+    purchase      = relationship("PurchaseDoc")
+
+
+# ── FinTransaction (Кассын журнал — орлого / зарлага) ─────
+class FinTransaction(Base):
+    __tablename__ = "fin_transactions"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    doc_date      = Column(DateTime(timezone=True), default=_now_local)
+    direction     = Column(String(10), nullable=False, index=True)   # income | expense
+    account_id    = Column(Integer, ForeignKey("fin_accounts.id"), nullable=False)
+    category      = Column(String(50), default="Бусад")   # Цалин, Түрээс, Худалдан авалт …
+    partner_type  = Column(String(20), nullable=True)
+    partner_id    = Column(Integer, nullable=True)
+    partner_name  = Column(String(100), nullable=True)
+    description   = Column(Text, nullable=True)           # гүйлгээний утга
+    amount        = Column(Float, nullable=False)
+    purchase_id   = Column(Integer, ForeignKey("purchases.id"), nullable=True)
+    debt_id       = Column(Integer, ForeignKey("debt_entries.id"), nullable=True)
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by    = Column(String(100), nullable=True)
+    created_at    = Column(DateTime(timezone=True), default=_now_local)
+
+    account       = relationship("FinAccount")
+    debt          = relationship("DebtEntry")

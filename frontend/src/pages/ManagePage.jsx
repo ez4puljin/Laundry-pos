@@ -1235,7 +1235,7 @@ function MachinesTab() {
 // ══════════════════════════════════════════════════════════
 // SHARED COMPONENTS
 // ══════════════════════════════════════════════════════════
-function Modal({ title, onClose, onSubmit, submitLabel, children }) {
+export function Modal({ title, onClose, onSubmit, submitLabel, children }) {
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
@@ -1270,7 +1270,7 @@ function Modal({ title, onClose, onSubmit, submitLabel, children }) {
   )
 }
 
-function Field({ label, children }) {
+export function Field({ label, children }) {
   return (
     <div>
       <label className="block text-xs font-semibold text-gray-500 mb-1.5">{label}</label>
