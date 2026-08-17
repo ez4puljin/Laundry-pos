@@ -25,6 +25,22 @@ const RoleBadge = ({ role }) => {
   )
 }
 
+// Кассын ажлын хүрээ — зөвхөн кассчинд хамаарна
+const SCOPE_META = {
+  laundry: { label: 'Laundry',         badge: 'bg-blue-50 text-blue-600 border-blue-200'   },
+  shower:  { label: 'Шүршүүр',         badge: 'bg-cyan-50 text-cyan-600 border-cyan-200'   },
+  master:  { label: 'Мастер кассчин',  badge: 'bg-teal-50 text-teal-700 border-teal-200'   },
+}
+
+const ScopeBadge = ({ scope }) => {
+  const meta = SCOPE_META[scope] || SCOPE_META.master
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${meta.badge}`}>
+      {meta.label}
+    </span>
+  )
+}
+
 export default function UsersPage() {
   const [users,   setUsers]   = useState([])
   const [loading, setLoading] = useState(true)
@@ -48,12 +64,15 @@ export default function UsersPage() {
 
   /* ── Modal openers ───────────────────────────────── */
   const openCreate = () => {
-    setForm({ username: '', full_name: '', password: '', role: 'cashier' })
+    setForm({ username: '', full_name: '', password: '', role: 'cashier', cashier_scope: 'master' })
     setModal({ type: MODAL.CREATE, user: null })
   }
 
   const openEdit = (user) => {
-    setForm({ full_name: user.full_name, role: user.role, is_active: user.is_active })
+    setForm({
+      full_name: user.full_name, role: user.role, is_active: user.is_active,
+      cashier_scope: user.cashier_scope || 'master',
+    })
     setModal({ type: MODAL.EDIT, user })
   }
 
@@ -87,6 +106,7 @@ export default function UsersPage() {
         full_name: form.full_name,
         role:      form.role,
         is_active: form.is_active,
+        cashier_scope: form.cashier_scope,
       })
       toast.success('Хэрэглэгч шинэчлэгдлээ')
       close(); fetchUsers()
@@ -154,6 +174,7 @@ export default function UsersPage() {
                 <div className="flex items-center gap-2 mt-0.5">
                   <span className="font-mono text-gray-400 text-xs">{u.username}</span>
                   <RoleBadge role={u.role} />
+                  {u.role === 'cashier' && <ScopeBadge scope={u.cashier_scope} />}
                   {!u.is_active && (
                     <span className="text-[10px] text-red-400 font-medium">Идэвхгүй</span>
                   )}
@@ -228,6 +249,12 @@ export default function UsersPage() {
                   <Field label="Эрх">
                     <RoleSelect value={form.role} onChange={v => setForm({ ...form, role: v })} />
                   </Field>
+                  {form.role === 'cashier' && (
+                    <Field label="Кассын төрөл">
+                      <ScopeSelect value={form.cashier_scope}
+                        onChange={v => setForm({ ...form, cashier_scope: v })} />
+                    </Field>
+                  )}
                 </div>
                 <div className="flex gap-3 mt-6">
                   <button onClick={close} className={cancelBtnCls}>Болих</button>
@@ -258,6 +285,12 @@ export default function UsersPage() {
                       disabled={modal.user.id === me?.id}
                     />
                   </Field>
+                  {form.role === 'cashier' && (
+                    <Field label="Кассын төрөл">
+                      <ScopeSelect value={form.cashier_scope}
+                        onChange={v => setForm({ ...form, cashier_scope: v })} />
+                    </Field>
+                  )}
                   <label className="flex items-center gap-3 cursor-pointer select-none">
                     <input
                       type="checkbox"
@@ -367,6 +400,26 @@ function Field({ label, children }) {
     <div>
       <label className="block text-sm font-medium text-gray-700 mb-1.5">{label}</label>
       {children}
+    </div>
+  )
+}
+
+function ScopeSelect({ value, onChange }) {
+  return (
+    <div className="flex gap-2">
+      {['laundry', 'shower', 'master'].map(s => (
+        <button
+          key={s}
+          type="button"
+          onClick={() => onChange(s)}
+          className={`flex-1 py-2 rounded-xl border text-xs font-medium transition-all cursor-pointer
+            ${value === s
+              ? SCOPE_META[s].badge.replace('50', '100')
+              : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}
+        >
+          {SCOPE_META[s].label}
+        </button>
+      ))}
     </div>
   )
 }

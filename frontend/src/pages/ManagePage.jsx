@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, Edit2, Trash2, AlertTriangle, ToggleLeft, ToggleRight, Package, Wrench, Tag, Settings, Ticket, MessageSquare, Star, Receipt, ShowerHead, DoorOpen, Save, Eraser, MousePointerClick } from 'lucide-react'
+import { Plus, Edit2, Trash2, AlertTriangle, ToggleLeft, ToggleRight, Package, Wrench, Tag, Settings, Ticket, MessageSquare, Star, Receipt, ShowerHead, DoorOpen, Save, Eraser, MousePointerClick, Building2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { servicesApi, inventoryApi, categoriesApi, machinesApi, ordersApi, settingsApi, roomsApi, roomTypesApi } from '../api/client'
 import { GRID_COLS, GRID_ROWS } from '../components/RoomMap'
+import useBrandStore from '../store/useBrandStore'
 
 const MACHINE_TYPE_OPTIONS = [
   { value: 'washer',      label: 'Угаалга' },
@@ -54,6 +55,8 @@ export default function ManagePage() {
           icon={<Ticket className="w-3.5 h-3.5" />} label="Купон" />
         <TabBtn active={tab === 'points'} onClick={() => setTab('points')}
           icon={<Star className="w-3.5 h-3.5" />} label="Оноо" />
+        <TabBtn active={tab === 'brand'} onClick={() => setTab('brand')}
+          icon={<Building2 className="w-3.5 h-3.5" />} label="Байгууллага" />
         <TabBtn active={tab === 'receipt'} onClick={() => setTab('receipt')}
           icon={<Receipt className="w-3.5 h-3.5" />} label="Баримт" />
         <TabBtn active={tab === 'sms'} onClick={() => setTab('sms')}
@@ -70,6 +73,7 @@ export default function ManagePage() {
         {tab === 'rooms'      && <RoomsTab />}
         {tab === 'coupons'    && <CouponsTab />}
         {tab === 'points'     && <PointsTab />}
+        {tab === 'brand'      && <BrandTab />}
         {tab === 'receipt'    && <ReceiptTab />}
         {tab === 'sms'        && <SmsTab />}
       </div>
@@ -2038,6 +2042,109 @@ function PointsTab() {
 
 
 // ══════════════════════════════════════════════════════════
+//  BrandTab – Системийн нэр (байгууллагын брэнд)
+// ══════════════════════════════════════════════════════════
+function BrandTab() {
+  const [form, setForm]       = useState({ brand_name: '', brand_short: '', brand_desc: '' })
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving]   = useState(false)
+  const setBrand = useBrandStore(s => s.setBrand)
+
+  useEffect(() => {
+    settingsApi.getBrand()
+      .then(r => { setForm(r.data); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [])
+
+  const save = async () => {
+    if (!form.brand_name.trim()) return toast.error('Системийн нэр оруулна уу')
+    setSaving(true)
+    try {
+      const { data } = await settingsApi.updateBrand(form)
+      setForm(data)
+      setBrand(data)                    // систем даяар шууд шинэчлэгдэнэ
+      document.title = data.brand_name
+      toast.success('Системийн нэр шинэчлэгдлээ')
+    } catch {
+      /* interceptor toast */
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) return <div className="p-6 text-center text-gray-400">Уншиж байна...</div>
+
+  return (
+    <div className="p-4 sm:p-6 max-w-2xl mx-auto">
+      <h2 className="text-lg font-bold text-gray-800 mb-1">Байгууллагын нэр</h2>
+      <p className="text-xs text-gray-500 mb-4">
+        Эдгээр нэр систем даяар хэрэглэгдэнэ — нэвтрэх хуудас, цэсний толгой,
+        ТВ дэлгэц, хөтчийн таб, ээлжийн баримт
+      </p>
+
+      <div className="bg-white rounded-xl border p-5 space-y-4">
+        <Field label="Системийн нэр (бүтэн) *">
+          <input value={form.brand_name}
+            onChange={e => setForm({ ...form, brand_name: e.target.value })}
+            className="w-full border rounded-lg px-3 py-2 text-sm"
+            placeholder="Цэмбий Laundry угаалга" />
+          <p className="text-xs text-gray-400 mt-1">Нэвтрэх хуудасны том гарчиг, ТВ дэлгэц, хөтчийн таб</p>
+        </Field>
+
+        <Field label="Богино нэр">
+          <input value={form.brand_short}
+            onChange={e => setForm({ ...form, brand_short: e.target.value })}
+            className="w-full border rounded-lg px-3 py-2 text-sm"
+            placeholder="Цэмбий" />
+          <p className="text-xs text-gray-400 mt-1">Логоны хажуу болон утасны дээд хэсэгт (хоосон бол бүтэн нэр)</p>
+        </Field>
+
+        <Field label="Тайлбар">
+          <input value={form.brand_desc}
+            onChange={e => setForm({ ...form, brand_desc: e.target.value })}
+            className="w-full border rounded-lg px-3 py-2 text-sm"
+            placeholder="Угаалгын үйлчилгээний удирдлагын систем" />
+          <p className="text-xs text-gray-400 mt-1">Нэвтрэх хуудасны дэд гарчиг</p>
+        </Field>
+
+        {/* Урьдчилан харах */}
+        <div className="rounded-xl overflow-hidden border">
+          <div className="bg-gradient-to-br from-blue-700 via-blue-800 to-indigo-900 p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-7 h-7 bg-white/20 rounded-lg flex items-center justify-center">
+                <span className="text-white text-xs">🧺</span>
+              </div>
+              <span className="text-white font-bold text-sm">
+                {form.brand_short || form.brand_name || '—'}
+              </span>
+            </div>
+            <div className="text-white text-2xl font-extrabold leading-tight break-words">
+              {form.brand_name || '—'}
+            </div>
+            {form.brand_desc && (
+              <div className="text-blue-200 text-sm mt-1">{form.brand_desc}</div>
+            )}
+          </div>
+          <p className="text-xs text-gray-400 px-3 py-2 bg-gray-50">Нэвтрэх хуудсан дээр ингэж харагдана</p>
+        </div>
+
+        <p className="text-xs text-gray-500 bg-amber-50 border border-amber-200 rounded-lg p-3">
+          Кассын баримтын толгой хэсэг «Баримт» табаас тусад нь тохируулагдана.
+          Тэнд хоосон үлдээвэл энэ системийн нэрийг ашиглана.
+        </p>
+
+        <button onClick={save} disabled={saving}
+          className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-2.5
+                     text-sm font-medium disabled:opacity-50">
+          {saving ? 'Хадгалж байна...' : 'Хадгалах'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+
+// ══════════════════════════════════════════════════════════
 //  ReceiptTab – Баримт загвар тохиргоо
 // ══════════════════════════════════════════════════════════
 function ReceiptTab() {
@@ -2071,6 +2178,9 @@ function ReceiptTab() {
         <Field label="Дэлгүүрийн нэр">
           <input value={form.shop_name} onChange={e => setForm({...form, shop_name: e.target.value})}
             className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="ЦЭМБИЙ LAUNDRY" />
+          <p className="text-xs text-gray-400 mt-1">
+            Хоосон бол «Байгууллага» табын системийн нэрийг ашиглана
+          </p>
         </Field>
 
         <Field label="Тайлбар">

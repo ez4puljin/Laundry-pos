@@ -8,12 +8,16 @@ import {
 import toast from 'react-hot-toast'
 import useStore     from '../store/useStore'
 import useAuthStore from '../store/useAuthStore'
+import useBrandStore from '../store/useBrandStore'
+import { canLaundry, canShower } from './ProtectedRoute'
 import { shiftsApi } from '../api/client'
 
+// scope: кассчинд л үйлчилнэ — 'laundry' зөвхөн угаалгын, 'shower' зөвхөн шүршүүрийн
+// хэсгүүдийг харна. Мастер кассчин болон админ бүгдийг харна.
 const ALL_NAV = [
   { to: '/',          label: 'POS Кассчин',  short: 'Касс',      icon: ShoppingCart,    roles: ['admin', 'cashier'] },
-  { to: '/queue',     label: 'Дараалал',     short: 'Дараалал',  icon: WashingMachine,  roles: ['admin', 'cashier'] },
-  { to: '/rooms',     label: 'Шүршүүр',      short: 'Шүршүүр',   icon: ShowerHead,      roles: ['admin', 'cashier', 'cleaner'] },
+  { to: '/queue',     label: 'Дараалал',     short: 'Дараалал',  icon: WashingMachine,  roles: ['admin', 'cashier'], scope: 'laundry' },
+  { to: '/rooms',     label: 'Шүршүүр',      short: 'Шүршүүр',   icon: ShowerHead,      roles: ['admin', 'cashier', 'cleaner'], scope: 'shower' },
   { to: '/history',   label: 'Түүх',         short: 'Түүх',      icon: ClipboardList,   roles: ['admin', 'cashier'] },
   { to: '/warnings',  label: 'Анхааруулга',  short: 'Анхаар',    icon: AlertTriangle,   roles: ['admin', 'cashier'] },
   { to: '/customers', label: 'Үйлчлүүлэгч', short: 'Харилцагч', icon: Users,           roles: ['admin', 'cashier'] },
@@ -24,17 +28,24 @@ const ALL_NAV = [
 ]
 
 export default function Layout({ children }) {
-  const itemCount = useStore(s => s.getItemCount())
-  const user      = useAuthStore(s => s.user)
-  const logout    = useAuthStore(s => s.logout)
-  const navigate  = useNavigate()
+  const itemCount  = useStore(s => s.getItemCount())
+  const user       = useAuthStore(s => s.user)
+  const logout     = useAuthStore(s => s.logout)
+  const brandShort = useBrandStore(s => s.brand_short)
+  const brandName  = useBrandStore(s => s.brand_name)
+  const navigate   = useNavigate()
 
   const [endingShift, setEndingShift] = useState(false)
   const [shiftSummary, setShiftSummary] = useState(null)
 
   const role     = user?.role || 'cashier'
   const isCashier = role === 'cashier'
-  const navItems = ALL_NAV.filter(item => item.roles.includes(role))
+  const navItems = ALL_NAV.filter(item => {
+    if (!item.roles.includes(role)) return false
+    if (item.scope === 'laundry' && !canLaundry(user)) return false
+    if (item.scope === 'shower'  && !canShower(user))  return false
+    return true
+  })
 
   const handleLogout = () => {
     logout()
@@ -165,7 +176,7 @@ export default function Layout({ children }) {
           <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center shrink-0">
             <WashingMachine className="text-white w-4 h-4" />
           </div>
-          <span className="text-white font-bold text-sm tracking-wide">Цэмбий Laundry</span>
+          <span className="text-white font-bold text-sm tracking-wide truncate">{brandShort}</span>
           <div className="ml-auto flex items-center gap-2">
             {itemCount > 0 && (
               <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
@@ -253,7 +264,7 @@ export default function Layout({ children }) {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
             {/* Print-only receipt */}
             <div className="print:block hidden">
-              <ShiftReceiptPrint data={shiftSummary} cashierName={user?.full_name} />
+              <ShiftReceiptPrint data={shiftSummary} cashierName={user?.full_name} brandName={brandName} />
             </div>
 
             {/* Screen view */}
@@ -330,7 +341,7 @@ export default function Layout({ children }) {
 
 
 /* ── Shift Receipt for thermal printer (80mm) ── */
-function ShiftReceiptPrint({ data, cashierName }) {
+function ShiftReceiptPrint({ data, cashierName, brandName }) {
   const started = new Date(data.shift.started_at)
   const ended = new Date(data.shift.ended_at)
   const diffMs = ended - started
@@ -342,7 +353,7 @@ function ShiftReceiptPrint({ data, cashierName }) {
   return (
     <div style={{ width: '80mm', fontFamily: 'monospace', fontSize: '12px', padding: '4mm' }}>
       <div style={{ textAlign: 'center', marginBottom: '8px' }}>
-        <div style={{ fontWeight: 'bold', fontSize: '14px' }}>ЦЭМБИЙ УГААЛГА</div>
+        <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{(brandName || '').toUpperCase()}</div>
         <div style={{ fontWeight: 'bold', fontSize: '13px', marginTop: '4px' }}>ТУЛГАЛТЫН БАРИМТ</div>
       </div>
       <div style={{ borderTop: '1px dashed #000', margin: '6px 0' }} />

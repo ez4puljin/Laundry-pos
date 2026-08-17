@@ -1,5 +1,7 @@
+import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
+import useBrandStore from './store/useBrandStore'
 
 import Layout         from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -20,6 +22,12 @@ import FinancePage      from './pages/FinancePage'
 const STAFF = ['admin', 'cashier']
 
 export default function App() {
+  const fetchBrand = useBrandStore(s => s.fetchBrand)
+  const brandName  = useBrandStore(s => s.brand_name)
+
+  useEffect(() => { fetchBrand() }, [fetchBrand])
+  useEffect(() => { document.title = brandName }, [brandName])
+
   return (
     <BrowserRouter>
       <Toaster
@@ -45,13 +53,13 @@ export default function App() {
                 <Routes>
                   {/* Кассчин + Админ */}
                   <Route path="/"          element={<ProtectedRoute roles={STAFF}><POSPage /></ProtectedRoute>}       />
-                  <Route path="/queue"     element={<ProtectedRoute roles={STAFF}><QueuePage /></ProtectedRoute>}     />
+                  <Route path="/queue"     element={<ProtectedRoute roles={STAFF} scope="laundry"><QueuePage /></ProtectedRoute>} />
                   <Route path="/history"   element={<ProtectedRoute roles={STAFF}><HistoryPage /></ProtectedRoute>}   />
                   <Route path="/warnings"  element={<ProtectedRoute roles={STAFF}><WarningsPage /></ProtectedRoute>}  />
                   <Route path="/customers" element={<ProtectedRoute roles={STAFF}><CustomersPage /></ProtectedRoute>} />
 
-                  {/* Бүх role — үйлчлэгч ч хамрагдана */}
-                  <Route path="/rooms"     element={<RoomsPage />} />
+                  {/* Бүх role — үйлчлэгч ч хамрагдана; laundry кассчинд хаалттай */}
+                  <Route path="/rooms"     element={<ProtectedRoute scope="shower"><RoomsPage /></ProtectedRoute>} />
 
                   {/* Admin only */}
                   <Route path="/inventory" element={

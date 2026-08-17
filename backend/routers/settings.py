@@ -7,8 +7,54 @@ from dotenv import load_dotenv, set_key
 from auth import require_admin
 
 router = APIRouter(prefix="/settings", tags=["settings"])
+# Нэвтрэлтгүй хандах хэсэг — нэвтрэх хуудас, ТВ дэлгэц системийн нэрийг унших
+public_router = APIRouter(prefix="/public", tags=["settings"])
 
 ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+
+# ── Байгууллага / системийн нэр ────────────────────────
+DEFAULT_BRAND_NAME  = "Цэмбий Laundry угаалга"
+DEFAULT_BRAND_SHORT = "Цэмбий"
+DEFAULT_BRAND_DESC  = "Угаалгын үйлчилгээний удирдлагын систем"
+
+
+class BrandSettings(BaseModel):
+    brand_name:  str = DEFAULT_BRAND_NAME    # бүтэн нэр — нэвтрэх хуудас, ТВ, баримт
+    brand_short: str = DEFAULT_BRAND_SHORT   # богино нэр — хажуугийн цэс, лого
+    brand_desc:  str = DEFAULT_BRAND_DESC    # тайлбар — нэвтрэх хуудасны дэд гарчиг
+
+
+def _brand_name() -> str:
+    """Тохируулсан системийн нэр (баримтын анхны утга болно)."""
+    return os.getenv("BRAND_NAME") or DEFAULT_BRAND_NAME
+
+
+@public_router.get("/brand", response_model=BrandSettings)
+def get_brand_settings():
+    """Нэвтрэлтгүй — нэвтрэх хуудас болон ТВ дэлгэц ашиглана."""
+    load_dotenv(ENV_PATH, override=True)
+    return BrandSettings(
+        brand_name  = _brand_name(),
+        brand_short = os.getenv("BRAND_SHORT") or DEFAULT_BRAND_SHORT,
+        brand_desc  = os.getenv("BRAND_DESC")  or DEFAULT_BRAND_DESC,
+    )
+
+
+@router.put("/brand", response_model=BrandSettings, dependencies=[Depends(require_admin)])
+def update_brand_settings(payload: BrandSettings):
+    if not ENV_PATH.exists():
+        ENV_PATH.touch()
+
+    name  = payload.brand_name.strip()  or DEFAULT_BRAND_NAME
+    short = payload.brand_short.strip() or name
+    desc  = payload.brand_desc.strip()
+
+    set_key(str(ENV_PATH), "BRAND_NAME",  name)
+    set_key(str(ENV_PATH), "BRAND_SHORT", short)
+    set_key(str(ENV_PATH), "BRAND_DESC",  desc)
+
+    load_dotenv(ENV_PATH, override=True)
+    return BrandSettings(brand_name=name, brand_short=short, brand_desc=desc)
 
 
 class SmsSettings(BaseModel):
@@ -89,7 +135,8 @@ class ReceiptSettings(BaseModel):
 def get_receipt_settings():
     load_dotenv(ENV_PATH, override=True)
     return ReceiptSettings(
-        shop_name=os.getenv("RECEIPT_SHOP_NAME", "ЦЭМБИЙ LAUNDRY"),
+        # Тусад нь тохируулаагүй бол системийн нэрийг ашиглана
+        shop_name=os.getenv("RECEIPT_SHOP_NAME") or _brand_name().upper(),
         shop_desc=os.getenv("RECEIPT_SHOP_DESC", "Угаалгын үйлчилгээ"),
         shop_phone=os.getenv("RECEIPT_SHOP_PHONE", "9900-0000"),
         footer_text=os.getenv("RECEIPT_FOOTER_TEXT", "Баярлалаа!"),

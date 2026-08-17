@@ -244,6 +244,34 @@ def _migrate():
             conn.execute(text("ALTER TABLE order_items ADD COLUMN room_id INTEGER REFERENCES rooms(id)"))
             conn.commit()
 
+    # users.cashier_scope (кассын ажлын хүрээ: laundry | shower | master)
+    usr_cols = [c["name"] for c in inspect(engine).get_columns("users")]
+    if "cashier_scope" not in usr_cols:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN cashier_scope VARCHAR(20) DEFAULT 'master'"))
+            conn.commit()
+
+    # room_sessions.no_show (дуудахад ирээгүй — оочир хадгалагдана)
+    rs_cols = [c["name"] for c in inspect(engine).get_columns("room_sessions")]
+    if "no_show" not in rs_cols:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE room_sessions ADD COLUMN no_show INTEGER DEFAULT 0"))
+            conn.commit()
+
+    # Зөвхөн шүршүүрээс бүрдсэн хуучин захиалгуудыг «олгосон» болгоно.
+    # Эдгээрт угаалгын ажил байхгүй тул дараалалд хүлээх шаардлагагүй бөгөөд
+    # pending хэвээр үлдвэл Түүх, Тайланд харагдахгүй байсан.
+    with engine.connect() as conn:
+        conn.execute(text("""
+            UPDATE orders SET status = 'delivered',
+                              delivered_at = COALESCE(delivered_at, created_at)
+            WHERE status = 'pending'
+              AND id IN (SELECT order_id FROM order_items
+                         GROUP BY order_id
+                         HAVING SUM(CASE WHEN item_type != 'room' THEN 1 ELSE 0 END) = 0)
+        """))
+        conn.commit()
+
     print("Migration done.")
 
 
@@ -365,6 +393,8 @@ app.include_router(inventory.router)
 app.include_router(machines.router, dependencies=[Depends(get_current_user)])
 # Settings: GET нь бүх user, PUT нь admin (router дотроо тодорхойлно)
 app.include_router(settings.router, dependencies=[Depends(get_current_user)])
+# Системийн нэр — нэвтрэх хуудас, ТВ дэлгэц уншина (нэвтрэлтгүй)
+app.include_router(settings.public_router)
 # Shifts: authenticated users
 app.include_router(shifts.router, dependencies=[Depends(get_current_user)])
 # Шүршүүр: CRUD нь admin (router дотроо), унших/шилжилт нь нэвтэрсэн хэрэглэгч

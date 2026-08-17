@@ -51,9 +51,10 @@ function RoomCell({ room, onClick, selected }) {
   const w = room.map_w || 1
   const h = room.map_h || 1
   // Хэдэн мөр текст багтахыг өндрөөр, урт багтахыг өргөнөөр шийднэ
-  const density = h >= 3 && w >= 3 ? 'full' : h >= 2 && w >= 2 ? 'mid' : 'tiny'
+  const density = h >= 3 && w >= 2 ? 'full' : h >= 2 ? 'mid' : 'tiny'
   const numCls  = density === 'full' ? 'text-base' : density === 'mid' ? 'text-sm' : 'text-[11px]'
   const timeCls = density === 'full' ? 'text-sm'   : density === 'mid' ? 'text-xs' : 'text-[10px]'
+  const typeCls = density === 'full' ? 'text-[10px]' : 'text-[9px]'
 
   const tip = [
     `Өрөө №${room.number}`,
@@ -94,9 +95,9 @@ function RoomCell({ room, onClick, selected }) {
         </span>
       )}
 
-      {density === 'full' && (
-        <span className="text-[10px] text-gray-500 truncate max-w-full mt-0.5">
-          {room.room_type?.name}
+      {density !== 'tiny' && room.room_type?.name && (
+        <span className={`${typeCls} text-gray-500 truncate max-w-full leading-tight`}>
+          {room.room_type.name}
         </span>
       )}
 

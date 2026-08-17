@@ -310,17 +310,25 @@ class UserRole(str, Enum):
     cleaner = "cleaner"    # Үйлчлэгч (цэвэрлэгээ)
 
 
+class CashierScope(str, Enum):
+    laundry = "laundry"    # зөвхөн угаалга
+    shower  = "shower"     # зөвхөн шүршүүр
+    master  = "master"     # Мастер кассчин — хоёулаа
+
+
 class UserCreate(BaseModel):
     username:  str
     full_name: str
     password:  str
     role:      UserRole = UserRole.cashier
+    cashier_scope: CashierScope = CashierScope.master
 
 
 class UserUpdate(BaseModel):
     full_name: Optional[str]      = None
     role:      Optional[UserRole] = None
     is_active: Optional[bool]     = None
+    cashier_scope: Optional[CashierScope] = None
 
 
 class UserPasswordReset(BaseModel):
@@ -332,6 +340,7 @@ class UserOut(BaseModel):
     username:   str
     full_name:  str
     role:       str
+    cashier_scope: str = "master"
     is_active:  bool
     created_at: datetime
 
@@ -537,6 +546,7 @@ class RoomSessionOut(BaseModel):
     price:               float
     duration_min:        int
     status:              str
+    no_show:             bool = False
     created_at:          datetime
     started_at:          Optional[datetime] = None
     ended_at:            Optional[datetime] = None

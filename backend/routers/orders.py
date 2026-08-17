@@ -14,7 +14,7 @@ def _now_local():
 from database import get_db
 from models import (
     Order, OrderItem, Service, Customer, Coupon, InventoryItem,
-    Room, RoomType, RoomSession,
+    Room, RoomType, RoomSession, order_kind_condition,
     ROOM_OCCUPYING_STATUSES, SESSION_ACTIVE_STATUSES,
 )
 from schemas import (
@@ -70,6 +70,7 @@ def _clamp_history_range(date_from: Optional[str], date_to: Optional[str], user)
 @router.get("/", response_model=List[OrderOut])
 def list_orders(
     status: Optional[str] = None,
+    kind: Optional[str] = None,          # laundry | shower (хоосон = бүгд)
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     skip: int = 0,
@@ -88,6 +89,9 @@ def list_orders(
         q = q.filter(Order.status == status)
     else:
         q = q.filter(Order.status != "deleted")
+    kind_cond = order_kind_condition(kind)
+    if kind_cond is not None:
+        q = q.filter(kind_cond)
     if date_from:
         q = q.filter(Order.created_at >= date_from)
     if date_to:
@@ -287,6 +291,10 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db), current_us
 
     # Шүршүүрийг зөвхөн урьдчилж төлсөн үед л зарна
     has_shower = any(i.room_id or i.room_type_id for i in payload.items)
+    # Зөвхөн шүршүүрээс бүрдсэн захиалгад угаалгын ажил байхгүй — шууд дууссанд тооцно.
+    # (Өрөөний амьдралын мөчлөгийг RoomSession тусад нь хөтөлнө.) Ингэснээр борлуулалт
+    # нь Түүх болон Тайланд шууд тусна.
+    is_shower_only = has_shower and all(i.room_id or i.room_type_id for i in payload.items)
     if has_shower and payload.payment_method.value == "unpaid":
         raise HTTPException(
             status_code=400,
@@ -449,7 +457,8 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db), current_us
         paid_by_id      = None if is_unpaid else current_user.id,
         paid_by         = None if is_unpaid else payload.cashier_name,
         notes           = payload.notes,
-        status          = "pending"
+        status          = "delivered" if is_shower_only else "pending",
+        delivered_at    = _now_local() if is_shower_only else None,
     )
     order.items = item_rows
     db.add(order)

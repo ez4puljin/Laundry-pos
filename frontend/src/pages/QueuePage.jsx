@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { RefreshCw, Clock, ChevronRight, CheckCircle2, Package, Loader2, Play, Archive, CircleCheck, Banknote, X, Plus, Search, Wrench, AlertTriangle } from 'lucide-react'
+import { RefreshCw, Clock, ChevronRight, CheckCircle2, Package, Loader2, Play, Archive, CircleCheck, Banknote, X, Plus, Search, Wrench, AlertTriangle, ShowerHead } from 'lucide-react'
 import toast from 'react-hot-toast'
 import dayjs from 'dayjs'
 import { ordersApi, machinesApi, servicesApi, inventoryApi } from '../api/client'
@@ -378,6 +378,7 @@ function OrderCard({ order, status, onUpdateStatus, usageMap, machines, onMachin
         <div className="space-y-1.5 mb-2.5">
           {expandedItems.map((item, i) => {
             const isProduct = item.item_type === 'product'
+            const isRoom    = item.item_type === 'room'
             const name = item._label
             const ukey = _ukey(item.id, item._subIndex)
             const usage = usageMap?.[ukey]
@@ -392,6 +393,8 @@ function OrderCard({ order, status, onUpdateStatus, usageMap, machines, onMachin
                     <Loader2 className="w-3.5 h-3.5 text-blue-500 shrink-0 animate-spin" />
                   ) : isProduct ? (
                     <Package className="w-3 h-3 text-emerald-500 shrink-0" />
+                  ) : isRoom ? (
+                    <ShowerHead className="w-3 h-3 text-cyan-500 shrink-0" />
                   ) : (
                     <span className={`w-2 h-2 rounded-full shrink-0 ${status.dot}`} />
                   )}
@@ -414,8 +417,8 @@ function OrderCard({ order, status, onUpdateStatus, usageMap, machines, onMachin
                   </div>
                 )}
 
-                {/* Assign machine button (processing stage, not yet assigned) */}
-                {isProcessing && !isProduct && !usage && (
+                {/* Assign machine button — зөвхөн угаалгын үйлчилгээнд (бараа, шүршүүрт хамаагүй) */}
+                {isProcessing && item.item_type === 'service' && !usage && (
                   <AssignInlineButton
                     item={item}
                     subIndex={item._subIndex}

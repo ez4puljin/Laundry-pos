@@ -7,9 +7,15 @@ import useAuthStore from '../store/useAuthStore'
 import RoomMap, { roomStatus, RoomLegend } from './RoomMap'
 import QueuePanel from './QueuePanel'
 import RoomActionModal from './RoomActions'
+import { canLaundry, canShower } from './ProtectedRoute'
 
 export default function ServiceGrid() {
-  const [mainTab, setMainTab]               = useState('services')
+  // Кассын төрөл: laundry → Шүршүүрийн таб нуугдана; shower → Үйлчилгээний таб нуугдана
+  const posUser     = useAuthStore(s => s.user)
+  const showLaundry = canLaundry(posUser)
+  const showShower  = canShower(posUser)
+
+  const [mainTab, setMainTab]               = useState(showLaundry ? 'services' : 'rooms')
 
   const [categories, setCategories]         = useState([])
   const [services, setServices]             = useState([])
@@ -73,30 +79,34 @@ export default function ServiceGrid() {
   return (
     <div className="flex flex-col h-full bg-gray-50">
 
-      {/* ── Main tabs ── */}
+      {/* ── Main tabs — кассын төрлөөр шүүгдэнэ ── */}
       <div className="flex bg-white border-b px-4 pt-2 gap-1">
-        <MainTab
-          active={mainTab === 'services'}
-          onClick={() => setMainTab('services')}
-          icon={<Wrench className="w-4 h-4" />}
-          label="Үйлчилгээ"
-        />
+        {showLaundry && (
+          <MainTab
+            active={mainTab === 'services'}
+            onClick={() => setMainTab('services')}
+            icon={<Wrench className="w-4 h-4" />}
+            label="Үйлчилгээ"
+          />
+        )}
         <MainTab
           active={mainTab === 'products'}
           onClick={() => setMainTab('products')}
           icon={<Package className="w-4 h-4" />}
           label="Бараа материал"
         />
-        <MainTab
-          active={mainTab === 'rooms'}
-          onClick={() => setMainTab('rooms')}
-          icon={<ShowerHead className="w-4 h-4" />}
-          label="Шүршүүр"
-        />
+        {showShower && (
+          <MainTab
+            active={mainTab === 'rooms'}
+            onClick={() => setMainTab('rooms')}
+            icon={<ShowerHead className="w-4 h-4" />}
+            label="Шүршүүр"
+          />
+        )}
       </div>
 
       {/* ════════ SHOWER TAB ════════ */}
-      {mainTab === 'rooms' && <ShowerTab />}
+      {mainTab === 'rooms' && showShower && <ShowerTab />}
 
       {/* ════════ SERVICES TAB ════════ */}
       {mainTab === 'services' && (

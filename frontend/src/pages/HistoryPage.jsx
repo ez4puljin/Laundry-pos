@@ -17,6 +17,13 @@ const QUICK_FILTERS = [
   { label: 'Энэ сар',  getRange: () => ({ from: dayjs().startOf('month').format('YYYY-MM-DD'), to: dayjs().format('YYYY-MM-DD') }) },
 ]
 
+// Захиалгын төрлөөр шүүх — угаалга / шүршүүр / бүгд
+const KIND_FILTERS = [
+  { value: '',        label: 'Бүгд' },
+  { value: 'laundry', label: 'Угаалга' },
+  { value: 'shower',  label: 'Шүршүүр' },
+]
+
 const PAYMENT_INFO = {
   cash:     { label: 'Бэлэн',     color: 'bg-emerald-100 text-emerald-700', icon: Banknote       },
   transfer: { label: 'Шилжүүлэг', color: 'bg-blue-100 text-blue-700',       icon: ArrowLeftRight },
@@ -39,6 +46,7 @@ export default function HistoryPage() {
   const [lateOrders,  setLateOrders]  = useState([])  // нөхөж авсан төлбөр
   const [loading,     setLoading]     = useState(false)
   const [activeQuick, setActiveQuick] = useState(0)
+  const [kind,        setKind]        = useState('')  // '' | 'laundry' | 'shower'
   const [expandedId,  setExpandedId]  = useState(null)
   const [usagesMap,   setUsagesMap]   = useState({})  // orderId → usages[]
 
@@ -53,28 +61,25 @@ export default function HistoryPage() {
     }
   }
 
-  const fetchOrders = async (from, to) => {
+  const fetchOrders = async (from, to, k = kind) => {
     setLoading(true)
     try {
+      const base = { date_from: from, date_to: to, ...(k ? { kind: k } : {}) }
       const promises = [
-        ordersApi.list({ status: 'delivered', date_from: from, date_to: to }),
-        ordersApi.list({ status: 'archived', date_from: from, date_to: to }),
-        // Анхааруулгатай захиалга дараалалд байсан ч төлөгдөөгүй дүн нь энд харагдана
-        ordersApi.flagged({ created_from: from, created_to: to }),
+        // Хугацааны бүх захиалга (устгагдсанаас бусад) — төлөв нь мөр бүр дээр харагдана
+        ordersApi.list(base),
         // Өмнөх өдрийн захиалгын төлбөрийг энэ хугацаанд нөхөж авсан
         ordersApi.latePayments({ date_from: from, date_to: to }),
       ]
       if (isAdmin) {
-        promises.push(ordersApi.list({ status: 'deleted', date_from: from, date_to: to }))
+        promises.push(ordersApi.list({ ...base, status: 'deleted' }))
       }
-      const [delivered, archived, flagged, late, deleted] = await Promise.all(promises)
+      const [active, late, deleted] = await Promise.all(promises)
 
-      // delivered/archived/deleted + flagged — id-гаар давхардлыг арилгана
       const byId = new Map()
-      for (const r of [delivered, archived, deleted]) {
+      for (const r of [active, deleted]) {
         for (const o of (r?.data || [])) byId.set(o.id, o)
       }
-      for (const o of (flagged.data || [])) if (!byId.has(o.id)) byId.set(o.id, o)
 
       setOrders([...byId.values()].sort(
         (a, b) => new Date(b.created_at) - new Date(a.created_at)
@@ -96,6 +101,11 @@ export default function HistoryPage() {
   const applyCustom = () => {
     setActiveQuick(null)
     fetchOrders(dateFrom, dateTo)
+  }
+
+  const applyKind = (k) => {
+    setKind(k)
+    fetchOrders(dateFrom, dateTo, k)
   }
 
   const activeOrders  = orders.filter(o => o.status !== 'deleted')
@@ -143,6 +153,22 @@ export default function HistoryPage() {
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             Шинэчлэх
           </button>
+        </div>
+
+        {/* Төрлөөр шүүх — угаалга / шүршүүр / бүгд */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {KIND_FILTERS.map(k => (
+            <button
+              key={k.value}
+              onClick={() => applyKind(k.value)}
+              className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition-all border
+                ${kind === k.value
+                  ? 'bg-gray-800 text-white border-gray-800'
+                  : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+            >
+              {k.label}
+            </button>
+          ))}
         </div>
 
         {/* Quick filters */}

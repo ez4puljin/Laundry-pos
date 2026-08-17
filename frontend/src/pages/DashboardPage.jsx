@@ -6,20 +6,29 @@ import { Banknote, ArrowLeftRight, Smartphone, Search, AlertTriangle } from 'luc
 import { reportsApi, machinesApi, shiftsApi } from '../api/client'
 import dayjs from 'dayjs'
 
+// Захиалгын төрлөөр шүүх — угаалга / шүршүүр / бүгд
+const KIND_FILTERS = [
+  { value: '',        label: 'Бүгд' },
+  { value: 'laundry', label: 'Угаалга' },
+  { value: 'shower',  label: 'Шүршүүр' },
+]
+
 export default function DashboardPage() {
   const [summary, setSummary]     = useState(null)
   const [dailyData, setDailyData] = useState([])
   const [topSvcs, setTopSvcs]     = useState([])
   const [cashierDays, setCashierDays] = useState([])
   const [loading, setLoading]     = useState(true)
+  const [kind, setKind]           = useState('')   // '' | 'laundry' | 'shower'
 
   useEffect(() => {
     const end   = dayjs().format('YYYY-MM-DD')
     const start = dayjs().subtract(6, 'day').format('YYYY-MM-DD')
     const monthStart = dayjs().startOf('month').format('YYYY-MM-DD')
+    setLoading(true)
     Promise.all([
-      reportsApi.dashboard(),
-      reportsApi.daily(start, end),
+      reportsApi.dashboard(kind),
+      reportsApi.daily(start, end, kind),
       reportsApi.topServices(start, end),
       reportsApi.cashierDays(monthStart, end).catch(() => ({ data: [] })),
     ]).then(([s, d, t, cd]) => {
@@ -34,7 +43,7 @@ export default function DashboardPage() {
       setTopSvcs(t.data)
       setCashierDays(cd.data || [])
     }).catch(() => {}).finally(() => setLoading(false))
-  }, [])
+  }, [kind])
 
   if (loading) {
     return (
@@ -58,11 +67,28 @@ export default function DashboardPage() {
   return (
     <div className="flex flex-col h-full overflow-y-auto">
       {/* Header */}
-      <div className="bg-white border-b px-4 py-3">
-        <h1 className="font-bold text-base text-gray-800">📊 Тайлан</h1>
-        <p className="text-xs text-gray-500 mt-0.5">
-          {dayjs().format('YYYY оны MM сарын DD өдөр')}
-        </p>
+      <div className="bg-white border-b px-4 py-3 space-y-2.5">
+        <div>
+          <h1 className="font-bold text-base text-gray-800">📊 Тайлан</h1>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {dayjs().format('YYYY оны MM сарын DD өдөр')}
+          </p>
+        </div>
+        {/* Төрлөөр шүүх */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {KIND_FILTERS.map(k => (
+            <button
+              key={k.value}
+              onClick={() => setKind(k.value)}
+              className={`px-3.5 py-1.5 rounded-full text-sm font-medium transition-all border
+                ${kind === k.value
+                  ? 'bg-gray-800 text-white border-gray-800'
+                  : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+            >
+              {k.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="p-3 sm:p-6 space-y-4">

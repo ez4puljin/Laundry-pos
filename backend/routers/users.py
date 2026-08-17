@@ -78,6 +78,7 @@ def create_user(
         full_name     = payload.full_name,
         password_hash = hash_password(payload.password),
         role          = payload.role,
+        cashier_scope = payload.cashier_scope.value if payload.role == schemas.UserRole.cashier else "master",
         is_active     = True,
     )
     db.add(user)
@@ -103,6 +104,8 @@ def update_user(
         user.full_name = payload.full_name
     if payload.role is not None:
         user.role = payload.role
+    if payload.cashier_scope is not None:
+        user.cashier_scope = payload.cashier_scope.value
     if payload.is_active is not None:
         user.is_active = payload.is_active
     db.commit()

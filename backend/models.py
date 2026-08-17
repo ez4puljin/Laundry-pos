@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, Integer, String, Float, Boolean,
-    DateTime, ForeignKey, Text, Enum, Table, Index, text as sa_text
+    DateTime, ForeignKey, Text, Enum, Table, Index, select, text as sa_text
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -167,6 +167,21 @@ class OrderItem(Base):
     room        = relationship("Room", foreign_keys=[room_id])
 
 
+# ── Захиалгын төрлөөр шүүх (Түүх, Тайлангийн сонголт) ──
+def order_kind_condition(kind: str):
+    """'shower'  — шүршүүрийн мөр агуулсан захиалга
+       'laundry' — угаалга / бараа материалын мөр агуулсан захиалга
+       Холимог захиалга (угаалга + шүршүүр) хоёуланд нь орно.
+       Бусад утга → None (шүүхгүй)."""
+    if kind == "shower":
+        sub = select(OrderItem.order_id).where(OrderItem.item_type == "room")
+    elif kind == "laundry":
+        sub = select(OrderItem.order_id).where(OrderItem.item_type != "room")
+    else:
+        return None
+    return Order.id.in_(sub)
+
+
 # ── Inventory (Бараа материал) ─────────────────────────
 class InventoryItem(Base):
     __tablename__ = "inventory"
@@ -192,6 +207,8 @@ class User(Base):
     full_name     = Column(String(100), nullable=False)
     password_hash = Column(String(255), nullable=False)
     role          = Column(String(20), default="cashier", nullable=False)   # "admin" | "cashier" | "cleaner"
+    # Кассын ажлын хүрээ: laundry (зөвхөн угаалга) | shower (зөвхөн шүршүүр) | master (хоёулаа)
+    cashier_scope = Column(String(20), default="master", nullable=False)
     is_active     = Column(Boolean, default=True, nullable=False)
     created_at    = Column(DateTime, server_default=func.now())
 
@@ -318,6 +335,9 @@ class RoomSession(Base):
     duration_min  = Column(Integer, nullable=False)
 
     status        = Column(String(20), default="waiting", index=True)
+    # Дуудахад ирээгүй — дараагийн хүн рүү алгасна. Оочир нь хадгалагдаж,
+    # ирмэгц эргэн нэгдүгээрт орно (created_at эрэмбэ хэвээр тул).
+    no_show       = Column(Boolean, default=False)
 
     created_at          = Column(DateTime(timezone=True), default=_now_local)  # = төлсөн цаг (FIFO)
     started_at          = Column(DateTime(timezone=True), nullable=True)       # Эхлүүлэх

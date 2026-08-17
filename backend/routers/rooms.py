@@ -355,6 +355,44 @@ def assign_session(
     return session
 
 
+@sessions_router.post("/{session_id}/no-show", response_model=schemas.RoomSessionOut)
+def mark_no_show(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Дуудахад ирээгүй — дараагийн хүн рүү алгасна. Оочир хадгалагдана."""
+    _deny_cleaner(current_user)
+    session = db.query(models.RoomSession).get(session_id)
+    if not session:
+        raise HTTPException(404, "Дараалал олдсонгүй")
+    if session.status != "waiting":
+        raise HTTPException(400, "Зөвхөн хүлээж буй тасалбарыг алгасна")
+    session.no_show = True
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+@sessions_router.post("/{session_id}/arrived", response_model=schemas.RoomSessionOut)
+def mark_arrived(
+    session_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Ирээгүй хүн ирлээ — оочир нь хамгийн эртнийх тул эргэн тэргүүнд орно."""
+    _deny_cleaner(current_user)
+    session = db.query(models.RoomSession).get(session_id)
+    if not session:
+        raise HTTPException(404, "Дараалал олдсонгүй")
+    if session.status != "waiting":
+        raise HTTPException(400, "Зөвхөн хүлээж буй тасалбарт хамаарна")
+    session.no_show = False
+    db.commit()
+    db.refresh(session)
+    return session
+
+
 @sessions_router.post("/{session_id}/cancel", response_model=schemas.RoomSessionOut)
 def cancel_session(
     session_id: int,
@@ -441,7 +479,8 @@ def queue_board(db: Session = Depends(get_db)):
         "types": [{"id": t.id, "name": t.name, "color": t.color} for t in types],
         "rooms": rooms_out,
         "waiting": [
-            {"queue_no": s.queue_no, "type_name": s.type_name, "room_type_id": s.room_type_id}
+            {"queue_no": s.queue_no, "type_name": s.type_name,
+             "room_type_id": s.room_type_id, "no_show": bool(s.no_show)}
             for s in waiting
         ],
         "now_serving": [

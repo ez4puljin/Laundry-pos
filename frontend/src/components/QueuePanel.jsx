@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X, LogIn, Clock, ShowerHead } from 'lucide-react'
+import { X, LogIn, Clock, ShowerHead, UserX, UserCheck } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { roomsApi } from '../api/client'
 import { useElapsed } from '../hooks/useCountdown'
@@ -81,16 +81,22 @@ export function AdmitModal({ session, rooms, onClose, onAssigned }) {
 
 
 /* ── Дарааллын нэг мөр ────────────────────────────────── */
-function QueueRow({ session, index, onAdmit, onCancel, readOnly }) {
+function QueueRow({ session, isNext, onAdmit, onCancel, onNoShow, onArrived, readOnly }) {
   const { label: waited } = useElapsed(session.created_at)
+  const noShow = session.no_show
 
   return (
-    <div className={`flex items-center gap-3 p-3 rounded-xl border ${index === 0 ? 'border-cyan-300 bg-cyan-50' : 'border-gray-200 bg-white'}`}>
+    <div className={`flex items-center gap-3 p-3 rounded-xl border
+      ${noShow ? 'border-orange-200 bg-orange-50/60'
+               : isNext ? 'border-cyan-300 bg-cyan-50' : 'border-gray-200 bg-white'}`}>
       {/* Оочирын тасалбар — өрөөний дугаараас ялгарах шар өнгө + «ООЧИР» тайлбар */}
-      <div className="flex-shrink-0 w-16 text-center rounded-lg bg-amber-50 border border-amber-300 py-1">
+      <div className={`flex-shrink-0 w-16 text-center rounded-lg py-1 border
+        ${noShow ? 'bg-white border-orange-300' : 'bg-amber-50 border-amber-300'}`}>
         <div className="text-[9px] font-bold text-amber-500 tracking-widest leading-none">ООЧИР</div>
         <div className="font-black text-amber-700 leading-tight tabular-nums">{queueLabel(session.queue_no)}</div>
-        {index === 0 && <div className="text-[9px] text-cyan-600 font-bold leading-none pb-0.5">Дараагийн</div>}
+        {noShow
+          ? <div className="text-[9px] text-orange-600 font-bold leading-none pb-0.5">Ирээгүй</div>
+          : isNext && <div className="text-[9px] text-cyan-600 font-bold leading-none pb-0.5">Дараагийн</div>}
       </div>
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium text-gray-800 truncate">{session.type_name}</div>
@@ -99,10 +105,32 @@ function QueueRow({ session, index, onAdmit, onCancel, readOnly }) {
           <span className="inline-flex items-center gap-0.5 flex-shrink-0">
             <Clock size={11} /> {waited}
           </span>
+          {noShow && (
+            <span className="text-orange-600 font-medium flex-shrink-0">· ирмэгц эхэнд орно</span>
+          )}
         </div>
       </div>
       {!readOnly && (
         <div className="flex items-center gap-1.5 flex-shrink-0">
+          {noShow ? (
+            <button
+              onClick={() => onArrived(session)}
+              title="Ирсэн — оочир нь эргэн тэргүүнд орно"
+              className="px-2.5 py-1.5 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700
+                         inline-flex items-center gap-1"
+            >
+              <UserCheck size={13} /> Ирсэн
+            </button>
+          ) : (
+            <button
+              onClick={() => onNoShow(session)}
+              title="Дуудахад ирээгүй — дараагийн хүн рүү алгасна"
+              className="px-2.5 py-1.5 rounded-lg border border-orange-300 text-orange-600 text-xs font-medium
+                         hover:bg-orange-50 inline-flex items-center gap-1"
+            >
+              <UserX size={13} /> Ирээгүй
+            </button>
+          )}
           <button
             onClick={() => onAdmit(session)}
             className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700
@@ -139,6 +167,23 @@ export default function QueuePanel({ waiting = [], rooms = [], types = [], onRef
       toast.success('Тасалбар цуцлагдлаа')
       onRefresh?.()
     } catch { /* interceptor toast */ }
+  }
+
+  const handleNoShow = async (session) => {
+    try {
+      await roomsApi.noShow(session.id)
+      toast(`Оочир ${queueLabel(session.queue_no)} — ирээгүй. Дараагийн хүн рүү шилжлээ, оочир нь хадгалагдана.`,
+            { icon: '⏭️' })
+      onRefresh?.()
+    } catch {}
+  }
+
+  const handleArrived = async (session) => {
+    try {
+      await roomsApi.arrived(session.id)
+      toast.success(`Оочир ${queueLabel(session.queue_no)} ирлээ — эргэн тэргүүнд орлоо`)
+      onRefresh?.()
+    } catch {}
   }
 
   // Төрлүүд мэдэгдэж байвал тэр эрэмбээр, үгүй бол дарааллаас нь гаргаж бүлэглэнэ
@@ -194,14 +239,16 @@ export default function QueuePanel({ waiting = [], rooms = [], types = [], onRef
                 <div className="text-center text-xs text-gray-400 py-4">Хоосон</div>
               ) : (
                 <div className="space-y-2">
-                  {g.items.map((s, i) => (
+                  {g.items.map(s => (
                     <QueueRow
                       key={s.id}
                       session={s}
-                      index={i}
+                      isNext={s.id === g.items.find(x => !x.no_show)?.id}
                       readOnly={readOnly}
                       onAdmit={setAdmitting}
                       onCancel={handleCancel}
+                      onNoShow={handleNoShow}
+                      onArrived={handleArrived}
                     />
                   ))}
                 </div>

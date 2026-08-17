@@ -4,6 +4,7 @@ import { WashingMachine, Loader2, Eye, EyeOff } from 'lucide-react'
 import toast from 'react-hot-toast'
 import axios from 'axios'
 import useAuthStore from '../store/useAuthStore'
+import useBrandStore from '../store/useBrandStore'
 import { homeFor } from '../components/ProtectedRoute'
 
 export default function LoginPage() {
@@ -12,7 +13,10 @@ export default function LoginPage() {
   const [showPw,   setShowPw]   = useState(false)
   const [loading,  setLoading]  = useState(false)
 
-  const navigate = useNavigate()
+  const navigate   = useNavigate()
+  const brandName  = useBrandStore(s => s.brand_name)
+  const brandShort = useBrandStore(s => s.brand_short)
+  const brandDesc  = useBrandStore(s => s.brand_desc)
   const setAuth  = useAuthStore(s => s.setAuth)
 
   const handleLogin = async (e) => {
@@ -49,17 +53,17 @@ export default function LoginPage() {
                           flex items-center justify-center shadow-lg">
             <WashingMachine className="w-6 h-6 text-white" />
           </div>
-          <span className="text-white font-bold text-lg tracking-wide">Цэмбий</span>
+          <span className="text-white font-bold text-lg tracking-wide">{brandShort}</span>
         </div>
 
         {/* Center headline */}
         <div>
-          <h1 className="text-5xl font-extrabold text-white mb-4 leading-tight">
-            Цэмбий<br />Laundry<br />угаалга
+          <h1 className="text-5xl font-extrabold text-white mb-4 leading-tight break-words">
+            {brandName}
           </h1>
-          <p className="text-blue-200 text-lg leading-relaxed">
-            Угаалгын үйлчилгээний<br />удирдлагын систем
-          </p>
+          {brandDesc && (
+            <p className="text-blue-200 text-lg leading-relaxed">{brandDesc}</p>
+          )}
         </div>
 
         {/* Bottom badges */}
@@ -81,7 +85,7 @@ export default function LoginPage() {
             <WashingMachine className="w-9 h-9 text-white" />
           </div>
           <h1 className="text-2xl font-bold text-gray-900 text-center">
-            Цэмбий Laundry угаалга
+            {brandName}
           </h1>
           <p className="text-gray-400 text-sm mt-1">Удирдлагын систем</p>
         </div>
@@ -160,7 +164,7 @@ export default function LoginPage() {
           </div>
 
           <p className="text-center text-xs text-gray-400 mt-5">
-            © 2026 Цэмбий Laundry угаалга
+            © {new Date().getFullYear()} {brandName}
           </p>
         </div>
       </div>

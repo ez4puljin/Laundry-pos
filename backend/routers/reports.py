@@ -6,7 +6,10 @@ from typing import List
 import json
 
 from database import get_db
-from models import Order, OrderItem, Service, Customer, InventoryItem, CashierShift, User
+from models import (
+    Order, OrderItem, Service, Customer, InventoryItem, CashierShift, User,
+    order_kind_condition,
+)
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -45,15 +48,18 @@ def _payment_split(orders) -> dict:
 
 
 @router.get("/dashboard")
-def dashboard_summary(db: Session = Depends(get_db)):
-    """Өнөөдрийн хурдан тоймлол"""
+def dashboard_summary(kind: str = None, db: Session = Depends(get_db)):
+    """Өнөөдрийн хурдан тоймлол. kind: laundry | shower (хоосон = бүгд)"""
     today = date.today()
     today_str = today.isoformat()
+    kind_cond = order_kind_condition(kind)
+    kind_filter = [kind_cond] if kind_cond is not None else []
 
     # Өнөөдрийн орлого (устгагдсан захиалга оруулахгүй)
     today_orders = db.query(Order).filter(
         func.date(Order.created_at) == today_str,
-        *_revenue_scope()
+        *_revenue_scope(),
+        *kind_filter,
     ).all()
 
     revenue_today = sum(o.total for o in today_orders)   # нийт (төлөгдөөгүй орсон)
@@ -67,6 +73,7 @@ def dashboard_summary(db: Session = Depends(get_db)):
         Order.status != "deleted",
         func.date(Order.paid_at) == today_str,
         func.date(Order.paid_at) != func.date(Order.created_at),
+        *kind_filter,
     ).all()
     late_total = sum(o.total for o in late_orders)
 
@@ -98,7 +105,8 @@ def dashboard_summary(db: Session = Depends(get_db)):
     # Өнөөдрийн устгагдсан захиалгууд
     deleted_orders = db.query(Order).filter(
         func.date(Order.created_at) == today_str,
-        Order.status == "deleted"
+        Order.status == "deleted",
+        *kind_filter,
     ).all()
     deleted_count = len(deleted_orders)
     deleted_total = sum(o.total for o in deleted_orders)
@@ -128,10 +136,13 @@ def dashboard_summary(db: Session = Depends(get_db)):
 def daily_report(
     start: str = Query(default=str(date.today() - timedelta(days=6))),
     end:   str = Query(default=str(date.today())),
+    kind:  str = None,          # laundry | shower (хоосон = бүгд)
     db: Session = Depends(get_db)
 ):
     """Өдрийн орлогын тайлан (chart data)"""
     _paid = Order.is_paid == True
+    kind_cond = order_kind_condition(kind)
+    kind_filter = [kind_cond] if kind_cond is not None else []
     rows = (
         db.query(
             func.date(Order.created_at).label("day"),
@@ -146,7 +157,8 @@ def daily_report(
         .filter(
             func.date(Order.created_at) >= start,
             func.date(Order.created_at) <= end,
-            *_revenue_scope()
+            *_revenue_scope(),
+            *kind_filter,
         )
         .group_by(func.date(Order.created_at))
         .order_by(func.date(Order.created_at))
@@ -165,6 +177,7 @@ def daily_report(
             func.date(Order.paid_at) >= start,
             func.date(Order.paid_at) <= end,
             func.date(Order.paid_at) != func.date(Order.created_at),
+            *kind_filter,
         )
         .group_by(func.date(Order.paid_at))
         .all()

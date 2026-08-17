@@ -119,8 +119,8 @@ export const categoriesApi = {
 
 // ── Reports ─────────────────────────────────────────────
 export const reportsApi = {
-  dashboard:   ()           => api.get('/reports/dashboard'),
-  daily:       (start, end) => api.get('/reports/daily', { params: { start, end } }),
+  dashboard:   (kind)             => api.get('/reports/dashboard', { params: kind ? { kind } : {} }),
+  daily:       (start, end, kind) => api.get('/reports/daily', { params: { start, end, ...(kind ? { kind } : {}) } }),
   topServices: (start, end) => api.get('/reports/top-services', { params: { start, end } }),
   cashierDays: (start, end) => api.get('/reports/cashier-days', { params: { start, end } }),
   inventory:   ()           => api.get('/reports/inventory-status'),
@@ -171,6 +171,8 @@ export const roomsApi = {
   waiting:       ()         => api.get('/room-sessions/waiting'),
   assign:        (sid, roomId) => api.post(`/room-sessions/${sid}/assign`, { room_id: roomId }),
   cancelTicket:  (sid)      => api.post(`/room-sessions/${sid}/cancel`),
+  noShow:        (sid)      => api.post(`/room-sessions/${sid}/no-show`),
+  arrived:       (sid)      => api.post(`/room-sessions/${sid}/arrived`),
 }
 
 // ── Санхүү (зөвхөн админ) ─────────────────────────────────
@@ -198,6 +200,8 @@ export const financeApi = {
 
 // ── Settings ──────────────────────────────────────────────
 export const settingsApi = {
+  getBrand:     ()     => api.get('/public/brand'),
+  updateBrand:  (data) => api.put('/settings/brand', data),
   getSms:       ()     => api.get('/settings/sms'),
   updateSms:    (data) => api.put('/settings/sms', data),
   getPoints:    ()     => api.get('/settings/points'),
