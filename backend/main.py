@@ -3,10 +3,13 @@ import io
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from database import engine, SessionLocal
 import models
+import licensing
 from routers import services, customers, orders, inventory, reports, categories, machines, settings, shifts, rooms, finance
+from routers import license_api
 from routers import users as users_router
 from auth import get_current_user, require_admin, hash_password
 
@@ -359,6 +362,41 @@ app = FastAPI(
     redirect_slashes=False,
 )
 
+
+# ── Лицензийн хамгаалалт ───────────────────────────────
+# Эрх дууссан/түгжигдсэн үед бүх ажлын API хаагдана. Зөвхөн лицензийн
+# цэгүүд болон нэвтрэх хуудасны нэр авах цэг нээлттэй үлдэнэ — ингэснээр
+# frontend-ийг өөрчилсөн ч өгөгдөлд хүрэх боломжгүй.
+LICENSE_FREE_PREFIXES = (
+    "/license/",
+    "/public/brand",
+    "/docs",
+    "/redoc",
+    "/openapi.json",
+)
+
+
+@app.middleware("http")
+async def license_guard(request, call_next):
+    path = request.url.path
+    if (
+        request.method == "OPTIONS"
+        or path == "/"
+        or path.startswith(LICENSE_FREE_PREFIXES)
+    ):
+        return await call_next(request)
+
+    state = licensing.status()
+    if not state["ok"]:
+        return JSONResponse(
+            status_code=402,
+            content={"detail": state["message"], "license": state},
+        )
+    return await call_next(request)
+
+
+# CORS-ыг ХАМГИЙН СҮҮЛД нэмнэ — ингэснээр гадна талд байрлаж, 402
+# хариунд ч CORS толгойнууд зөв тавигдана (гар утасны апп-д чухал).
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -375,6 +413,9 @@ app.add_middleware(
 )
 
 # ── Routers ────────────────────────────────────────────
+# Лиценз: нэвтрэлтгүй (түгжигдсэн үед эрх нээх шаардлагатай)
+app.include_router(license_api.router)
+
 # Public: /auth/login, /auth/me  |  Admin: /users/*
 app.include_router(users_router.router)
 

@@ -4,6 +4,7 @@ import { Toaster } from 'react-hot-toast'
 import useBrandStore from './store/useBrandStore'
 
 import Layout         from './components/Layout'
+import LicenseGate    from './components/LicenseGate'
 import ProtectedRoute from './components/ProtectedRoute'
 
 import LoginPage     from './pages/LoginPage'
@@ -29,6 +30,7 @@ export default function App() {
   useEffect(() => { document.title = brandName }, [brandName])
 
   return (
+    <LicenseGate>
     <BrowserRouter>
       <Toaster
         position="bottom-right"
@@ -82,5 +84,6 @@ export default function App() {
 
       </Routes>
     </BrowserRouter>
+    </LicenseGate>
   )
 }
