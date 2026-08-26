@@ -12,6 +12,10 @@
 Хэрэглэгчийн бүх оролтыг cmd-ийн `set /p` биш ЭНД уншина: chcp 65001
 идэвхтэй үед cmd оролт уншихдаа алдаа гаргадаг бол Python UTF-8-ыг
 найдвартай зохицуулна.
+
+ГАРАЛТ: Windows-ийн консол растер фонттой үед кирилл үсгийг `?` болгодог
+тул энэ модулийн бүх хэвлэлтийг латин болгож гаргана (translit.latin).
+Эх кодыг кириллээр бичсэн хэвээр үлдээв — засварлахад ойлгомжтой байна.
 """
 
 import argparse
@@ -44,8 +48,18 @@ if sys.platform == "win32":
 
 import licensing
 from licensing import vault
+from licensing.translit import latin
 
 LINE = "=" * 52
+
+
+# Модулийн доторх бүх `print` дуудлагыг латин болгож дамжуулна.
+# (Модулийн түвшний нэр builtins-ийг далдалдаг тул нэг цэгээс шийднэ.)
+_builtin_print = print
+
+
+def print(*args, **kwargs):          # noqa: A001 - зориудаар далдалж байна
+    _builtin_print(*(latin(a) for a in args), **kwargs)
 
 
 class Cancelled(Exception):
@@ -54,7 +68,7 @@ class Cancelled(Exception):
 
 def _ask(prompt: str, default: str = "") -> str:
     try:
-        value = input(prompt).strip()
+        value = input(latin(prompt)).strip()
     except (EOFError, KeyboardInterrupt):
         raise Cancelled
     return value or default
@@ -62,7 +76,7 @@ def _ask(prompt: str, default: str = "") -> str:
 
 def _ask_password(prompt: str) -> str:
     try:
-        return getpass.getpass(prompt)
+        return getpass.getpass(latin(prompt))
     except (EOFError, KeyboardInterrupt):
         raise Cancelled
 

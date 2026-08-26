@@ -30,6 +30,16 @@ if sys.platform == "win32":
             stream.buffer, encoding="utf-8", errors="replace"
         )
 
+# Консол растер фонттой үед кирилл үсэг "?" болдог тул латинаар гаргана
+sys.path.insert(0, str(HERE))
+from licensing.translit import latin  # noqa: E402
+
+_builtin_print = print
+
+
+def print(*args, **kwargs):          # noqa: A001 - зориудаар далдалж байна
+    _builtin_print(*(latin(a) for a in args), **kwargs)
+
 _KEY_RE = re.compile(r"""^\s*SECRET_KEY\s*=\s*(.*?)\s*$""", re.MULTILINE)
 
 

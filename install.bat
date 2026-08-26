@@ -1,41 +1,45 @@
 @echo off
 chcp 65001 >nul
 setlocal enabledelayedexpansion
-title Laundry POS - Суулгац (Installer)
+title Laundry POS - Suulgats (Installer)
+
+rem  ANHAAR: ene fail zowhon ASCII useg aguulna.
+rem  Windows-iin konsol rastr fonttoi uyed kirill usgiig "?" bolgodog tul
+rem  buh medegdliig latinaar bichsen. Ingesneer ali ch kompyutert zov haragdana.
 
 set "ROOT=%~dp0"
 set "ERR=0"
 
 echo ================================================
-echo   LAUNDRY POS - СУУЛГАЦ (INSTALLER)
-echo   Шинэ компьютерт бэлтгэх скрипт
+echo   LAUNDRY POS - SUULGATS (INSTALLER)
+echo   Shine kompyutert beltgeh skript
 echo ================================================
 echo.
-echo Энэ скрипт дараахыг автоматаар суулгана:
-echo   - Python + Node.js ^(байхгүй бол өөрөө татаж суулгана^)
-echo   - Backend  (Python venv + багцууд)
+echo Ene skript daraahyg avtomataar suulgana:
+echo   - Python + Node.js ^(baihgui bol ooroo tataj suulgana^)
+echo   - Backend  (Python venv + bagtsuud)
 echo   - Frontend (npm install)
 echo   - Mobile   (Expo / npm install)
-echo   - Лиценз    (ашиглах хугацаа тохируулах)
+echo   - Litsenz  (ashiglah hugatsaa tohiruulah)
 echo.
-echo Интернэт холболт шаардлагатай. 5-15 минут үргэлжилж магадгүй.
-echo.
-
-rem ════════════════════════════════════════════════════════
-rem  1. Шаардлагатай програмуудыг шалгаж, дутууг СУУЛГАХ
-rem ════════════════════════════════════════════════════════
-echo [1/5] Шаардлагатай програмуудыг шалгаж байна...
+echo Internet holbolt shaardlagatai. 5-15 minut urgeljilj magadgui.
 echo.
 
-rem ── Python / Node.js -г автоматаар суулгах (winget эсвэл шууд татах) ──
+rem ========================================================
+rem  1. Shaardlagatai programuudyg shalgaj, dutuug SUULGAH
+rem ========================================================
+echo [1/5] Shaardlagatai programuudyg shalgaj baina...
+echo.
+
+rem -- Python / Node.js -g avtomataar suulgah (winget esvel shuud tatah) --
 if exist "%ROOT%tools\bootstrap.ps1" (
     powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%tools\bootstrap.ps1"
     if !errorlevel! neq 0 (
         echo.
         echo ================================================
-        echo  Шаардлагатай програмуудыг суулгаж чадсангүй.
-        echo  Дээрх заавраар гараар суулгаад install.bat-г
-        echo  ДАХИН ажиллуулна уу.
+        echo  Shaardlagatai programuudyg suulgaj chadsangui.
+        echo  Deerh zaavraar garaar suulgaad install.bat-g
+        echo  DAHIN ajilluulna uu.
         echo ================================================
         echo.
         pause
@@ -43,10 +47,10 @@ if exist "%ROOT%tools\bootstrap.ps1" (
     )
     call :refresh_path
 ) else (
-    echo   [!] tools\bootstrap.ps1 олдсонгүй — зөвхөн шалгана.
+    echo   [!] tools\bootstrap.ps1 oldsongui - zowhon shalgana.
 )
 
-rem ── Суулгасны дараа дахин шалгаж, командуудыг тодорхойлох ──
+rem -- Suulgasny daraa dahin shalgaj, komanduudyg todorhoiloh --
 set "PY="
 where py >nul 2>&1
 if !errorlevel! equ 0 set "PY=py"
@@ -55,132 +59,132 @@ if not defined PY (
     if !errorlevel! equ 0 set "PY=python"
 )
 if not defined PY (
-    echo   [X] Python ОЛДСОНГҮЙ
-    echo       https://www.python.org/downloads/ -ээс Python 3.11+ суулгана уу.
-    echo       Суулгахдаа "Add Python to PATH" -г ЗААВАЛ чагтлана уу.
+    echo   [X] Python OLDSONGUI
+    echo       https://www.python.org/downloads/ -ees Python 3.11+ suulgana uu.
+    echo       Suulgahdaa "Add Python to PATH" -g ZAAVAL chagtlana uu.
     set "ERR=1"
 )
 
 where node >nul 2>&1
 if !errorlevel! neq 0 (
-    echo   [X] Node.js ОЛДСОНГҮЙ
-    echo       https://nodejs.org/ -ээс LTS хувилбарыг суулгана уу.
+    echo   [X] Node.js OLDSONGUI
+    echo       https://nodejs.org/ -ees LTS huvilbaryg suulgana uu.
     set "ERR=1"
 )
 
 where npm >nul 2>&1
 if !errorlevel! neq 0 (
-    echo   [X] npm ОЛДСОНГҮЙ ^(Node.js дотор багтдаг^)
+    echo   [X] npm OLDSONGUI ^(Node.js dotor bagtdag^)
     set "ERR=1"
 )
 
 echo.
 if "!ERR!"=="1" (
     echo ================================================
-    echo  Дутуу програмуудыг суулгаад install.bat-г
-    echo  ДАХИН ажиллуулна уу.
+    echo  Dutuu programuudyg suulgaad install.bat-g
+    echo  DAHIN ajilluulna uu.
     echo.
-    echo  Хэрэв дөнгөж сая суулгасан бол компьютерээ
-    echo  ДАХИН АСААГААД оролдоно уу.
+    echo  Herev dongoj saya suulgasan bol kompyuteree
+    echo  DAHIN ASAAGAAD oroldono uu.
     echo ================================================
     echo.
     pause
     exit /b 1
 )
 
-rem ── Tailscale (заавал биш — зөвхөн гар утасны апп-д хэрэгтэй) ──
+rem -- Tailscale (zaaval bish - zowhon gar utasny app-d heregtei) --
 set "TS_EXE=C:\Program Files\Tailscale\tailscale.exe"
 if exist "%TS_EXE%" (
-    echo   [OK] Tailscale суусан байна ^(гар утасны апп ажиллана^)
+    echo   [OK] Tailscale suusan baina ^(gar utasny app ajillana^)
 ) else (
-    echo   [!] Tailscale олдсонгүй — заавал биш.
-    echo       Веб POS ^(frontend^) localhost дээр асуудалгүй ажиллана.
-    echo       Гар утасны Expo апп өөр төхөөрөмжөөс холбогдоход
-    echo       Tailscale хэрэгтэй: https://tailscale.com/download
+    echo   [!] Tailscale oldsongui - zaaval bish.
+    echo       Veb POS ^(frontend^) localhost deer asuudalgui ajillana.
+    echo       Gar utasny Expo app oor tohooromjoos holbogdohod
+    echo       Tailscale heregtei: https://tailscale.com/download
 )
 echo.
 
-rem ════════════════════════════════════════════════════════
-rem  2. BACKEND — Python venv + багцууд
-rem ════════════════════════════════════════════════════════
-echo [2/5] Backend суулгаж байна (Python)...
+rem ========================================================
+rem  2. BACKEND - Python venv + bagtsuud
+rem ========================================================
+echo [2/5] Backend suulgaj baina (Python)...
 cd /d "%ROOT%backend"
 
 if exist "venv" (
-    echo   - Хуучин venv-г устгаж байна ^(шинэ PC дээр ажиллахгүй^)...
+    echo   - Huuchin venv-g ustgaj baina ^(shine PC deer ajillahgui^)...
     rmdir /S /Q venv
 )
-rem  Устгаж чадаагүй бол ихэвчлэн програм ажиллаж байгаагийн шинж —
-rem  ойлгомжгүй алдаа өгөхийн оронд шалтгааныг нь хэлнэ.
+rem  Ustgaj chadaagui bol ihenhdee program ajillaj baigaagiin shinj -
+rem  oilgomjgui aldaa ogohiin orond shaltgaanyg n helne.
 if exist "venv" (
     echo.
-    echo   [X] Хуучин venv-г устгаж чадсангүй.
-    echo       Програм ажиллаж байвал Stop.bat -г ажиллуулж хаагаад,
-    echo       backend/frontend цонхнуудыг хаагаад дахин оролдоно уу.
+    echo   [X] Huuchin venv-g ustgaj chadsangui.
+    echo       Program ajillaj baival Stop.bat -g ajilluulj haagaad,
+    echo       backend/frontend tsonhnuudyg haagaad dahin oroldono uu.
     echo.
     pause
     exit /b 1
 )
-echo   - Шинэ virtual environment үүсгэж байна...
+echo   - Shine virtual environment uusgej baina...
 !PY! -m venv venv
 if !errorlevel! neq 0 (
-    echo   [X] venv үүсгэхэд алдаа гарлаа.
+    echo   [X] venv uusgehed aldaa garlaa.
     pause
     exit /b 1
 )
-echo   - pip шинэчилж байна...
+echo   - pip shinechilj baina...
 venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
-echo   - Python багцуудыг суулгаж байна ^(requirements.txt^)...
+echo   - Python bagtsuudyg suulgaj baina ^(requirements.txt^)...
 venv\Scripts\python.exe -m pip install -r requirements.txt
 if !errorlevel! neq 0 (
-    echo   [X] Python багц суулгахад алдаа гарлаа.
+    echo   [X] Python bagts suulgahad aldaa garlaa.
     pause
     exit /b 1
 )
-rem ── .env бэлтгэх — JWT нууц түлхүүрийг санамсаргүй үүсгэнэ ──
+rem -- .env beltgeh - JWT nuuts tulhuuriig sanamsargui uusgene --
 venv\Scripts\python.exe setup_env.py
-echo   [OK] Backend бэлэн боллоо.
+echo   [OK] Backend belen bolloo.
 echo.
 
-rem ════════════════════════════════════════════════════════
-rem  3. FRONTEND — npm install
-rem ════════════════════════════════════════════════════════
-echo [3/5] Frontend суулгаж байна (npm)...
+rem ========================================================
+rem  3. FRONTEND - npm install
+rem ========================================================
+echo [3/5] Frontend suulgaj baina (npm)...
 cd /d "%ROOT%frontend"
 if exist "node_modules" (
-    echo   - Хуучин node_modules-г устгаж байна...
+    echo   - Huuchin node_modules-g ustgaj baina...
     rmdir /S /Q node_modules
 )
 if exist "node_modules" (
     echo.
-    echo   [X] Хуучин node_modules-г устгаж чадсангүй.
-    echo       Stop.bat -г ажиллуулж програмыг хаагаад дахин оролдоно уу.
+    echo   [X] Huuchin node_modules-g ustgaj chadsangui.
+    echo       Stop.bat -g ajilluulj programyg haagaad dahin oroldono uu.
     echo.
     pause
     exit /b 1
 )
 call npm install
 if !errorlevel! neq 0 (
-    echo   [X] Frontend суулгахад алдаа гарлаа.
+    echo   [X] Frontend suulgahad aldaa garlaa.
     pause
     exit /b 1
 )
-echo   [OK] Frontend бэлэн боллоо.
+echo   [OK] Frontend belen bolloo.
 echo.
 
-rem ════════════════════════════════════════════════════════
-rem  4. MOBILE — Expo / npm install
-rem ════════════════════════════════════════════════════════
-echo [4/5] Mobile апп суулгаж байна (Expo)...
+rem ========================================================
+rem  4. MOBILE - Expo / npm install
+rem ========================================================
+echo [4/5] Mobile app suulgaj baina (Expo)...
 cd /d "%ROOT%mobile"
 if exist "node_modules" (
-    echo   - Хуучин node_modules-г устгаж байна...
+    echo   - Huuchin node_modules-g ustgaj baina...
     rmdir /S /Q node_modules
 )
 if exist "node_modules" (
     echo.
-    echo   [X] Хуучин node_modules-г устгаж чадсангүй.
-    echo       Stop.bat -г ажиллуулж програмыг хаагаад дахин оролдоно уу.
+    echo   [X] Huuchin node_modules-g ustgaj chadsangui.
+    echo       Stop.bat -g ajilluulj programyg haagaad dahin oroldono uu.
     echo.
     pause
     exit /b 1
@@ -188,40 +192,43 @@ if exist "node_modules" (
 if exist "package-lock.json" del /Q package-lock.json
 call npm install --legacy-peer-deps
 if !errorlevel! neq 0 (
-    echo   [X] Mobile суулгахад алдаа гарлаа.
+    echo   [X] Mobile suulgahad aldaa garlaa.
     pause
     exit /b 1
 )
-echo   [OK] Mobile бэлэн боллоо.
+echo   [OK] Mobile belen bolloo.
 echo.
 
-rem ════════════════════════════════════════════════════════
-rem  5. ЛИЦЕНЗ — ашиглах хугацаа тохируулах
-rem ════════════════════════════════════════════════════════
-echo [5/5] Лицензийн тохиргоо...
+rem  npm konsolyn codepage-g solij magadgui tul dahin batalgaajuulna
+chcp 65001 >nul
+
+rem ========================================================
+rem  5. LITSENZ - ashiglah hugatsaa tohiruulah
+rem ========================================================
+echo [5/5] Litsenziin tohirgoo...
 echo.
 cd /d "%ROOT%backend"
 set "LICPY=venv\Scripts\python.exe"
 
-rem ── Лицензийн түлхүүр байгаа эсэхийг шалгах ──────────────
-rem  ЭНД мастер нууц үг ҮҮСГЭХГҮЙ. Хэрэв үүсгэвэл хэрэглэгч бүр
-rem  өөрийн түлхүүртэй болж, хамгаалалт утгагүй болно.
-rem  Түлхүүрийг зөвхөн эзэмшигч License.bat -аар нэг удаа үүсгэнэ.
+rem -- Litsenziin tulhuur baigaa esehiig shalgah --
+rem  END master nuuts ug UUSGEHGUI. Herev uusgevel heregleegch bur
+rem  ooriin tulhuurtei bolj, hamgaalalt utgagui bolno.
+rem  Tulhuuriig zowhon ezemshigch License.bat -aar neg udaa uusgene.
 if exist "licensing\pubkey_data.py" goto :lic_check
 if exist "licensing\vault.dat" goto :lic_check
-echo   [X] Лицензийн түлхүүр олдсонгүй.
+echo   [X] Litsenziin tulhuur oldsongui.
 echo.
-echo       Энэ хувилбар дутуу бэлтгэгдсэн байна:
+echo       Ene huvilbar dutuu beltgegdsen baina:
 echo         backend\licensing\vault.dat
 echo         backend\licensing\pubkey_data.py
 echo.
-echo       Эдгээр 2 файл git-д commit хийгдсэн байх ёстой.
-echo       Програм нийлүүлэгчид хандана уу.
+echo       Edgeer 2 fail git-d commit hiigdsen baih yostoi.
+echo       Program niiluulegchid handana uu.
 echo.
 pause
 exit /b 1
 
-rem ── Ашиглах хугацааг сонгох (бүх асуултыг Python хариуцна) ──
+rem -- Ashiglah hugatsaag songoh (buh asuultyg Python hariutsana) --
 :lic_check
 "%LICPY%" license_cli.py wizard
 
@@ -229,28 +236,28 @@ echo.
 cd /d "%ROOT%"
 
 echo ================================================
-echo   СУУЛГАЦ АМЖИЛТТАЙ ДУУСЛАА!
+echo   SUULGATS AMJILTTAI DUUSLAA!
 echo ================================================
 echo.
-echo  Програмыг асаахдаа:  run.bat  -г 2 дарж ажиллуулна уу.
+echo  Programyg asaahdaa:  run.bat  -g 2 darj ajilluulna uu.
 echo.
 echo  Backend:  http://localhost:8001
 echo  Frontend: http://localhost:5173
-echo  Expo:     run.bat дотор QR код гарч ирнэ.
+echo  Expo:     run.bat dotor QR kod garch irne.
 echo.
-echo  Хугацаа дуусахад програм өөрөө түгжигдэж, мастер нууц үг
-echo  эсвэл идэвхжүүлэх түлхүүр асуух болно.
+echo  Hugatsaa duusahad program ooroo tugjigdej, master nuuts ug
+echo  esvel idevhjuuleh tulhuur asuuh bolno.
 echo.
 pause
 endlocal
 exit /b 0
 
 
-rem ════════════════════════════════════════════════════════
-rem  Дэд програм: шинээр суусан програмуудын PATH-ыг татах
-rem ════════════════════════════════════════════════════════
-rem  Суулгагч PATH-ыг registry-д бичдэг ч ажиллаж буй cmd-д
-rem  тусдаггүй. bootstrap.ps1 шинэ PATH-ыг файлд үлдээсэн байна.
+rem ========================================================
+rem  Ded program: shineer suusan programuudyn PATH-yg tatah
+rem ========================================================
+rem  Suulgagch PATH-yg registry-d bichdeg ch ajillaj bui cmd-d
+rem  tusdaggui. bootstrap.ps1 shine PATH-yg faild uldeesen baina.
 :refresh_path
 set "NEWPATH="
 if exist "%TEMP%\lpos_path.txt" (

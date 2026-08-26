@@ -23,6 +23,13 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "backend"))
 
 import license_cli  # noqa: E402
+from licensing.translit import latin  # noqa: E402
+
+_builtin_print = print
+
+
+def print(*args, **kwargs):          # noqa: A001 - консолд латинаар гаргана
+    _builtin_print(*(latin(a) for a in args), **kwargs)
 
 
 def main() -> int:

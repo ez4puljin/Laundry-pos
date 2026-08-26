@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 title Laundry POS - Starting...
 
-rem ── Tailscale IP авах ───────────────────────────────────
+rem -- Tailscale IP avah -----------------------------------
 set "TAILSCALE_IP=100.107.239.48"
 set "TS_EXE=C:\Program Files\Tailscale\tailscale.exe"
 if exist "%TS_EXE%" (
@@ -18,26 +18,26 @@ echo   LAUNDRY POS
 echo   Tailscale IP: %TAILSCALE_IP%
 echo ================================================
 
-rem ── Backend ─────────────────────────────────────────────
+rem -- Backend ---------------------------------------------
 echo Starting Backend...
 cd /d "%~dp0backend"
 start "Laundry Backend" cmd /k "venv\Scripts\activate && uvicorn main:app --host 0.0.0.0 --port 8001 --reload"
 
-rem ── Frontend ────────────────────────────────────────────
+rem -- Frontend --------------------------------------------
 echo Starting Frontend...
 cd /d "%~dp0frontend"
 start "Laundry Frontend" cmd /k "npm run dev"
 
-rem ── Mobile (Expo) ───────────────────────────────────────
+rem -- Mobile (Expo) ---------------------------------------
 cd /d "%~dp0mobile"
 
-rem mobile/.env файл дахь Tailscale IP-г шинэчлэх
+rem mobile/.env fail dah Tailscale IP-g shinechleh
 > .env (
     echo EXPO_PUBLIC_SERVER_IP=%TAILSCALE_IP%
     echo EXPO_PUBLIC_SERVER_PORT=5173
 )
 
-rem Хэрэв expo SDK 51 (хуучин) суусан байвал дахин суулгах
+rem Herev expo SDK 51 (huuchin) suusan baival dahin suulgah
 set "NEED_INSTALL=0"
 if not exist "node_modules" set "NEED_INSTALL=1"
 if exist "node_modules\expo\package.json" (
@@ -55,13 +55,13 @@ if "!NEED_INSTALL!"=="1" (
 echo Starting Expo Go server...
 start "Laundry Expo" cmd /k "set REACT_NATIVE_PACKAGER_HOSTNAME=%TAILSCALE_IP% && npx expo start --lan"
 
-rem ── Summary ────────────────────────────────────────────
+rem -- Summary ---------------------------------------------
 echo.
 echo ================================================
 echo   Laundry POS started!
 echo   Backend:  http://%TAILSCALE_IP%:8001
 echo   Frontend: http://%TAILSCALE_IP%:5173
-echo   Expo:     QR код Expo цонхноос уншуулна уу
+echo   Expo:     QR kod Expo tsonhnoos unshuulna uu
 echo ================================================
 echo.
 timeout /t 3 >nul
