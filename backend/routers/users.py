@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 from typing import List
 
 from database import get_db
@@ -22,24 +22,10 @@ def login(payload: schemas.LoginRequest, db: Session = Depends(get_db)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Нэвтрэх нэр эсвэл нууц үг буруу байна",
         )
-    # Касс эрхтэй бол ээлж шалгах
-    if user.role == "cashier":
-        active_shift = db.query(models.CashierShift).options(
-            joinedload(models.CashierShift.user)
-        ).filter(models.CashierShift.status == "active").first()
-
-        if active_shift and active_shift.user_id != user.id:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Касс {active_shift.user.full_name} идэвхтэй ажиллаж байна"
-            )
-
-        # Идэвхтэй ээлж байхгүй бол шинээр эхлэх
-        if not active_shift:
-            new_shift = models.CashierShift(user_id=user.id)
-            db.add(new_shift)
-            db.commit()
-
+    # Ээлжийг ЭНД нээхгүй. Кассчин нэвтэрсний дараа «Ээлж эхлүүлэх» дарж
+    # өөрөө эхэлнэ (GET /shifts/my → POST /shifts/start). Өөр касс ижил
+    # төрөл дээр ажиллаж байвал нэвтрэхийг хориглохгүй — дэлгэц дээр хэн
+    # ажиллаж байгааг харуулж, ажиллуулахгүй болгоно.
     token = create_access_token(user.id, user.role)
     return schemas.TokenResponse(
         access_token=token,

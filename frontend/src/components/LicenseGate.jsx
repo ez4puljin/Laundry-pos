@@ -320,7 +320,10 @@ function TrialBanner({ lic }) {
   const urgent = lic.days_left <= 3
   return (
     <div
-      className={`fixed bottom-4 left-4 z-[9998] flex items-center gap-2.5 px-4 py-2.5
+      /* Хажуугийн цэсний доод товчнууд (Дуусгах / Гарах) болон гар утасны
+         доод навигацийг халхлахгүй байрлал */
+      className={`fixed bottom-20 left-4 md:bottom-4 md:left-24
+                  z-[9998] flex items-center gap-2.5 px-4 py-2.5
                   rounded-xl shadow-lg border text-xs font-medium backdrop-blur
                   ${urgent
                     ? 'bg-red-50/95 border-red-200 text-red-700'

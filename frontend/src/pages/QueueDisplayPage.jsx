@@ -49,15 +49,12 @@ export default function QueueDisplayPage() {
 
   const freeCount = rooms.filter(r => r.status === 'free').length
 
-  // Төрөл бүрийн дараалал тусдаа
-  const groups = (board.types || []).length
-    ? board.types.map(t => ({ ...t, items: waiting.filter(w => w.room_type_id === t.id) }))
-    : waiting.reduce((acc, s) => {
-        let g = acc.find(x => x.id === s.room_type_id)
-        if (!g) { g = { id: s.room_type_id, name: s.type_name, items: [] }; acc.push(g) }
-        g.items.push(s)
-        return acc
-      }, [])
+  // Дараалал НЭГДСЭН — дугаарлалт өдөр бүр глобал
+  // Ирээгүй хүн оочироо хадгалж эхэндээ үлдэнэ; ДАРААГИЙН нь
+  // ирээгүйг алгасаад эхний хүлээж буй хүнд очно
+  const shown  = waiting.slice(0, 15)
+  const extra  = waiting.length - shown.length
+  const nextId = waiting.find(w => !w.no_show)
 
   return (
     <div className="min-h-screen bg-gray-950 text-white flex flex-col">
@@ -183,62 +180,41 @@ export default function QueueDisplayPage() {
               )}
             </div>
           ) : (
-            <div className="space-y-5">
-              {groups.map(g => {
-                // Ирээгүй хүн оочироо хадгалж эхэндээ үлдэнэ; ДАРААГИЙН нь
-                // ирээгүйг алгасаад эхний хүлээж буй хүнд очно
-                const shown  = g.items.slice(0, 10)
-                const extra  = g.items.length - shown.length
-                const nextId = g.items.find(w => !w.no_show)
-                return (
-                  <div key={g.id}>
-                    <div className="flex items-center gap-2 mb-2">
-                      {g.color && <span className="w-3 h-3 rounded-full" style={{ background: g.color }} />}
-                      <span className="text-lg md:text-xl font-bold text-gray-300">{g.name}</span>
-                      <span className="text-gray-600 text-sm">({g.items.length} хүлээж байна)</span>
-                    </div>
-                    {g.items.length === 0 ? (
-                      <div className="text-gray-700 text-base rounded-xl border border-dashed border-gray-800 py-3 text-center">
-                        Хоосон
+            <>
+              <div className="grid grid-cols-5 gap-2">
+                {shown.map((w, i) => {
+                  const isNext = nextId && w === nextId
+                  return (
+                    <div
+                      key={`${w.queue_no}-${i}`}
+                      className={`rounded-lg px-1 py-2.5 text-center border-2
+                        ${isNext ? 'border-amber-400 bg-amber-400/10'
+                          : w.no_show ? 'border-gray-800 bg-gray-900/40'
+                          : 'border-gray-800 bg-gray-900/60'}`}
+                    >
+                      <div className={`text-2xl md:text-3xl font-black tabular-nums leading-tight
+                                       ${isNext ? 'text-amber-300'
+                                         : w.no_show ? 'text-gray-500' : 'text-gray-300'}`}>
+                        {qLabel(w.queue_no)}
                       </div>
-                    ) : (
-                      <>
-                        <div className="grid grid-cols-5 gap-1.5">
-                          {shown.map((w, i) => {
-                            const isNext = nextId && w === nextId
-                            return (
-                              <div
-                                key={`${g.id}-${w.queue_no}-${i}`}
-                                className={`rounded-lg px-1 py-2 text-center border-2
-                                  ${isNext ? 'border-amber-400 bg-amber-400/10'
-                                    : w.no_show ? 'border-gray-800 bg-gray-900/40'
-                                    : 'border-gray-800 bg-gray-900/60'}`}
-                              >
-                                <div className={`text-xl md:text-2xl font-black tabular-nums leading-tight
-                                                 ${isNext ? 'text-amber-300'
-                                                   : w.no_show ? 'text-gray-500' : 'text-gray-300'}`}>
-                                  {qLabel(w.queue_no)}
-                                </div>
-                                {isNext
-                                  ? <div className="text-amber-400 text-[10px] md:text-xs font-bold leading-none">ДАРААГИЙН</div>
-                                  : w.no_show
-                                    ? <div className="text-gray-600 text-[10px] md:text-xs font-bold leading-none">ИРЭЭГҮЙ</div>
-                                    : null}
-                              </div>
-                            )
-                          })}
-                        </div>
-                        {extra > 0 && (
-                          <div className="text-gray-500 text-sm mt-1.5 text-right">
-                            +{extra} хүн цааш хүлээж байна
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
+                      <div className="text-gray-600 text-[10px] md:text-xs truncate leading-tight">
+                        {w.type_name}
+                      </div>
+                      {isNext
+                        ? <div className="text-amber-400 text-[10px] md:text-xs font-bold leading-none">ДАРААГИЙН</div>
+                        : w.no_show
+                          ? <div className="text-gray-600 text-[10px] md:text-xs font-bold leading-none">ИРЭЭГҮЙ</div>
+                          : null}
+                    </div>
+                  )
+                })}
+              </div>
+              {extra > 0 && (
+                <div className="text-gray-500 text-sm mt-2 text-right">
+                  +{extra} хүн цааш хүлээж байна
+                </div>
+              )}
+            </>
           )}
         </section>
       </main>

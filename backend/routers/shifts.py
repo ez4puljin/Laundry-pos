@@ -6,8 +6,8 @@ from datetime import datetime, timezone, timedelta
 import json
 
 from database import get_db
-from models import CashierShift, Order, User
-from schemas import ShiftOut, ShiftSummary
+from models import CashierShift, Order, OrderItem, User
+from schemas import ShiftOut, ShiftSummary, ShiftState
 from auth import get_current_user
 
 _LOCAL_TZ = timezone(timedelta(hours=8))
@@ -17,10 +17,56 @@ def _now_local():
 router = APIRouter(prefix="/shifts", tags=["shifts"])
 
 
-def _get_active_shift(db: Session) -> Optional[CashierShift]:
-    return db.query(CashierShift).options(
-        joinedload(CashierShift.user)
-    ).filter(CashierShift.status == "active").first()
+# ── Кассын төрөл (ажлын хүрээ) ────────────────────────────
+SCOPE_LABEL = {
+    "laundry": "Угаалга",
+    "shower":  "Шүршүүр",
+    "master":  "Бүх касс",
+}
+
+
+def _scope_of(user: User) -> str:
+    """Кассчны ажлын хүрээ. Админ/үйлчлэгч бүгдийг хамарна."""
+    if user.role == "cashier":
+        return user.cashier_scope or "master"
+    return "master"
+
+
+def _conflicts(a: str, b: str) -> bool:
+    """Хоёр ажлын хүрээ огтлолцож байвал ЗЭРЭГ ээлж нээгдэхгүй.
+
+    · laundry ↔ laundry, shower ↔ shower  — ижил төрөл дээр нэг л касс
+    · master нь хоёуланг хамарна тул бүх төрөлтэй мөргөлдөнө
+    · laundry ↔ shower — өөр төрөл тул зэрэг ажиллаж БОЛНО
+    """
+    return a == b or a == "master" or b == "master"
+
+
+def _active_shifts(db: Session) -> List[CashierShift]:
+    return (
+        db.query(CashierShift)
+        .options(joinedload(CashierShift.user))
+        .filter(CashierShift.status == "active")
+        .all()
+    )
+
+
+def _my_active(db: Session, user_id: int) -> Optional[CashierShift]:
+    return (
+        db.query(CashierShift)
+        .options(joinedload(CashierShift.user))
+        .filter(CashierShift.user_id == user_id, CashierShift.status == "active")
+        .first()
+    )
+
+
+def _blocking_shift(db: Session, user: User) -> Optional[CashierShift]:
+    """Энэ хэрэглэгчийг ажиллуулахгүй байгаа ӨӨР кассын идэвхтэй ээлж."""
+    scope = _scope_of(user)
+    for s in _active_shifts(db):
+        if s.user_id != user.id and _conflicts(scope, s.scope or "master"):
+            return s
+    return None
 
 
 def _calc_summary(shift: CashierShift, db: Session) -> dict:
@@ -79,6 +125,32 @@ def _calc_summary(shift: CashierShift, db: Session) -> dict:
     customer_ids = set(o.customer_id for o in orders if o.customer_id)
     phone_set = set(o.phone for o in orders if o.phone and not o.customer_id)
 
+    # ── Задаргаа ──────────────────────────────────────────
+    # Оноо, хямдрал нь мөнгө болж кассд ОРОХГҮЙ тул нийт дүнд ордоггүй.
+    # Гэхдээ тулгалт хийхэд хэрэгтэй тул тусад нь харуулна.
+    points_total   = float(sum(o.points_used     or 0 for o in orders))
+    discount_total = float(sum(o.discount_amount or 0 for o in orders))
+    vat_total      = float(sum(o.vat_amount      or 0 for o in orders))
+
+    # Үйлчилгээний төрлөөр (мөрийн дүнгээр — холимог захиалга хуваагдана)
+    order_ids = [o.id for o in orders]
+    shower_total = laundry_total = product_total = 0.0
+    if order_ids:
+        rows = (
+            db.query(OrderItem.item_type, func.sum(OrderItem.total_price))
+            .filter(OrderItem.order_id.in_(order_ids))
+            .group_by(OrderItem.item_type)
+            .all()
+        )
+        for item_type, amount in rows:
+            amount = float(amount or 0)
+            if item_type == "room":
+                shower_total += amount
+            elif item_type == "product":
+                product_total += amount
+            else:
+                laundry_total += amount
+
     return {
         "total_orders": len(orders),
         "total_customers": len(customer_ids) + len(phone_set),
@@ -89,13 +161,45 @@ def _calc_summary(shift: CashierShift, db: Session) -> dict:
         "card_total": card_total,
         "unpaid_total": unpaid_total,
         "late_total": late_total,
+        "points_total": points_total,
+        "discount_total": discount_total,
+        "vat_total": vat_total,
+        "shower_total": shower_total,
+        "laundry_total": laundry_total,
+        "product_total": product_total,
     }
 
 
 @router.get("/active", response_model=Optional[ShiftOut])
-def get_active_shift(db: Session = Depends(get_db)):
-    shift = _get_active_shift(db)
-    return shift
+def get_active_shift(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Өөрийн идэвхтэй ээлж (байхгүй бол null)"""
+    return _my_active(db, current_user.id)
+
+
+@router.get("/my", response_model=ShiftState)
+def my_shift_state(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """POS-ыг нээх эсэхийг шийддэг төлөв.
+
+    · requires_shift=False → ээлж шаардахгүй (админ, үйлчлэгч)
+    · shift байвал         → ажиллаж болно
+    · blocked_by байвал    → өөр касс ажиллаж байна, ажиллах боломжгүй
+    · хоёулаа null         → «Ээлж эхлүүлэх» дарж эхэлнэ
+    """
+    scope = _scope_of(current_user)
+    mine  = _my_active(db, current_user.id)
+    return ShiftState(
+        requires_shift = current_user.role == "cashier",
+        scope          = scope,
+        scope_label    = SCOPE_LABEL.get(scope, scope),
+        shift          = mine,
+        blocked_by     = None if mine else _blocking_shift(db, current_user),
+    )
 
 
 @router.post("/start", response_model=ShiftOut)
@@ -107,16 +211,23 @@ def start_shift(
     if current_user.role != "cashier":
         raise HTTPException(status_code=400, detail="Зөвхөн кассчин ээлж нээнэ")
 
-    active = _get_active_shift(db)
-    if active:
-        if active.user_id == current_user.id:
-            return active  # Өөрийн ээлж байвал шууд буцаана
+    mine = _my_active(db, current_user.id)
+    if mine:
+        return mine  # Өөрийн ээлж байвал шууд буцаана
+
+    scope = _scope_of(current_user)
+    blocker = _blocking_shift(db, current_user)
+    if blocker:
         raise HTTPException(
-            status_code=403,
-            detail=f"Касс {active.user.full_name} идэвхтэй ажиллаж байна"
+            status_code=409,
+            detail=(
+                f"«{SCOPE_LABEL.get(blocker.scope or 'master', blocker.scope)}» кассын "
+                f"ээлж нээлттэй байна — {blocker.user.full_name}. "
+                f"Тэр ээлжийг хаасны дараа эхлүүлнэ үү."
+            )
         )
 
-    shift = CashierShift(user_id=current_user.id)
+    shift = CashierShift(user_id=current_user.id, scope=scope)
     db.add(shift)
     db.commit()
     db.refresh(shift)
@@ -131,12 +242,7 @@ def end_shift(
     db: Session = Depends(get_db)
 ):
     """Ээлж дуусгах"""
-    shift = db.query(CashierShift).options(
-        joinedload(CashierShift.user)
-    ).filter(
-        CashierShift.user_id == current_user.id,
-        CashierShift.status == "active"
-    ).first()
+    shift = _my_active(db, current_user.id)
     if not shift:
         raise HTTPException(status_code=404, detail="Идэвхтэй ээлж олдсонгүй")
 
@@ -176,17 +282,21 @@ def end_shift(
 def shift_history(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    scope: Optional[str] = None,          # laundry | shower | master
+    include_active: bool = False,
     db: Session = Depends(get_db)
 ):
     """Ээлжийн түүх (admin)"""
-    q = db.query(CashierShift).options(
-        joinedload(CashierShift.user)
-    ).filter(CashierShift.status == "ended")
+    q = db.query(CashierShift).options(joinedload(CashierShift.user))
+    if not include_active:
+        q = q.filter(CashierShift.status == "ended")
 
     if date_from:
         q = q.filter(func.date(CashierShift.started_at) >= date_from)
     if date_to:
         q = q.filter(func.date(CashierShift.started_at) <= date_to)
+    if scope:
+        q = q.filter(CashierShift.scope == scope)
 
     shifts = q.order_by(CashierShift.started_at.desc()).limit(100).all()
     results = []

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { ShowerHead, RefreshCw, Tv } from 'lucide-react'
-import { roomsApi, roomTypesApi } from '../api/client'
+import { roomsApi } from '../api/client'
 import useAuthStore from '../store/useAuthStore'
 import useCountdown from '../hooks/useCountdown'
 import RoomMap, { roomStatus, STATUS_META, RoomLegend, queueLabel } from '../components/RoomMap'
@@ -12,6 +12,10 @@ import { ROOM_ACTIONS as ACTIONS, runRoomAction } from '../components/RoomAction
 function RoomCard({ room, role, onAction, busy }) {
   const status  = roomStatus(room)
   const meta    = STATUS_META[status]
+  // Өрөөнд олон хүн байж болно; таймер хамгийн урт хугацаатайгаар нь тоологдоно
+  const sessions = room.active_sessions?.length
+    ? room.active_sessions
+    : (room.active_session ? [room.active_session] : [])
   const session = room.active_session
   const { label: timeLabel, isOverdue, progress } = useCountdown(
     status === 'in_use' ? session?.started_at : null,
@@ -26,22 +30,30 @@ function RoomCard({ room, role, onAction, busy }) {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="font-bold text-lg text-gray-800">Өрөө №{room.number}</div>
-          <div className="text-xs text-gray-500 truncate">{room.room_type?.name}</div>
+          <div className="text-xs text-gray-500 truncate">
+            {room.room_type?.name}
+            {sessions.length > 1 && ` · ${sessions.length} хүн`}
+          </div>
         </div>
         <span className={`text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${meta.text} bg-white/70`}>
           {overdue ? 'Хугацаа хэтэрсэн!' : meta.label}
         </span>
       </div>
 
-      {session && (
+      {sessions.length > 0 && (
         <div className="mt-2 text-xs text-gray-600 space-y-0.5">
-          {session.queue_no > 0 && (
-            <div className="inline-block font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 rounded">
-              Оочир {queueLabel(session.queue_no)}
-            </div>
-          )}
-          {session.customer_name && <div className="truncate">{session.customer_name}</div>}
-          {session.cleaned_by && status === 'cleaning' && (
+          <div className="flex flex-wrap gap-1">
+            {sessions.map(s => (
+              <span key={s.id}
+                    className="font-bold text-amber-700 bg-amber-50 border border-amber-200
+                               px-1.5 rounded tabular-nums">
+                {queueLabel(s.queue_no)}
+                <span className="font-normal text-amber-600/70"> {s.type_name}</span>
+              </span>
+            ))}
+          </div>
+          {session?.customer_name && <div className="truncate">{session.customer_name}</div>}
+          {session?.cleaned_by && status === 'cleaning' && (
             <div className="truncate">Үйлчлэгч: {session.cleaned_by}</div>
           )}
         </div>
@@ -86,7 +98,6 @@ function RoomCard({ room, role, onAction, busy }) {
 export default function RoomsPage() {
   const [rooms, setRooms]     = useState([])
   const [waiting, setWaiting] = useState([])
-  const [types, setTypes]     = useState([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy]       = useState(false)
 
@@ -98,10 +109,6 @@ export default function RoomsPage() {
       .then(([r, w]) => { setRooms(r.data || []); setWaiting(w.data || []) })
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [])
-
-  useEffect(() => {
-    roomTypesApi.list({ active_only: true }).then(r => setTypes(r.data || [])).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -183,7 +190,6 @@ export default function RoomsPage() {
         <QueuePanel
           waiting={waiting}
           rooms={rooms}
-          types={types}
           onRefresh={fetchAll}
           readOnly={isCleaner}
         />

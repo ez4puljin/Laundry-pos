@@ -1,16 +1,14 @@
-import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
   ShoppingCart, Users, LayoutDashboard,
   WashingMachine, Settings2, ClipboardList,
   UserCog, LogOut, Clock, AlertTriangle, ShowerHead, Wallet,
 } from 'lucide-react'
-import toast from 'react-hot-toast'
 import useStore     from '../store/useStore'
 import useAuthStore from '../store/useAuthStore'
 import useBrandStore from '../store/useBrandStore'
+import useShiftStore from '../store/useShiftStore'
 import { canLaundry, canShower } from './ProtectedRoute'
-import { shiftsApi } from '../api/client'
 
 // scope: кассчинд л үйлчилнэ — 'laundry' зөвхөн угаалгын, 'shower' зөвхөн шүршүүрийн
 // хэсгүүдийг харна. Мастер кассчин болон админ бүгдийг харна.
@@ -32,11 +30,10 @@ export default function Layout({ children }) {
   const user       = useAuthStore(s => s.user)
   const logout     = useAuthStore(s => s.logout)
   const brandShort = useBrandStore(s => s.brand_short)
-  const brandName  = useBrandStore(s => s.brand_name)
   const navigate   = useNavigate()
 
-  const [endingShift, setEndingShift] = useState(false)
-  const [shiftSummary, setShiftSummary] = useState(null)
+  const endShift    = useShiftStore(s => s.endShift)
+  const endingShift = useShiftStore(s => s.busy)
 
   const role     = user?.role || 'cashier'
   const isCashier = role === 'cashier'
@@ -47,28 +44,17 @@ export default function Layout({ children }) {
     return true
   })
 
+  // Ээлж хаалгүйгээр гарч болно — дараа нь буцаж нэвтрэхэд ээлж хэвээр нээлттэй
   const handleLogout = () => {
+    useShiftStore.getState().reset()
     logout()
     navigate('/login', { replace: true })
   }
 
+  // Тулгалтын баримтыг ShiftGate харуулна (ээлж хаагдсаны дараа ч үлдэнэ)
   const handleEndShift = async () => {
     if (!confirm('Ээлж дуусгах уу?')) return
-    setEndingShift(true)
-    try {
-      const res = await shiftsApi.end()
-      setShiftSummary(res.data)
-    } catch {
-      // error handled by interceptor
-    } finally {
-      setEndingShift(false)
-    }
-  }
-
-  const printAndLogout = () => {
-    window.print()
-    setShiftSummary(null)
-    handleLogout()
+    await endShift()
   }
 
   const initials = (user?.full_name || 'U')
@@ -139,29 +125,31 @@ export default function Layout({ children }) {
             )}
           </div>
 
-          {/* End Shift / Logout */}
-          {isCashier ? (
+          {/* Ээлж дуусгах — зөвхөн кассчинд */}
+          {isCashier && (
             <button
               onClick={handleEndShift}
               disabled={endingShift}
               className="flex flex-col items-center justify-center w-16 h-12 rounded-xl
-                         text-gray-400 hover:bg-orange-600/20 hover:text-orange-400 transition-all"
-              title="Ээлж дуусгах"
+                         text-gray-400 hover:bg-orange-600/20 hover:text-orange-400
+                         disabled:opacity-50 transition-all"
+              title="Ээлж дуусгаж тулгалтын баримт хэвлэх"
             >
               <Clock className="w-5 h-5" />
               <span style={{ fontSize: '9px' }} className="mt-0.5">Дуусгах</span>
             </button>
-          ) : (
-            <button
-              onClick={handleLogout}
-              className="flex flex-col items-center justify-center w-16 h-12 rounded-xl
-                         text-gray-400 hover:bg-red-600/20 hover:text-red-400 transition-all"
-              title="Гарах"
-            >
-              <LogOut className="w-5 h-5" />
-              <span style={{ fontSize: '9px' }} className="mt-0.5">Гарах</span>
-            </button>
           )}
+
+          {/* Гарах — ээлж НЭЭЛТТЭЙ хэвээр үлдэнэ */}
+          <button
+            onClick={handleLogout}
+            className="flex flex-col items-center justify-center w-16 h-12 rounded-xl
+                       text-gray-400 hover:bg-red-600/20 hover:text-red-400 transition-all"
+            title={isCashier ? 'Ээлж хаахгүйгээр бүртгэлээс гарах' : 'Гарах'}
+          >
+            <LogOut className="w-5 h-5" />
+            <span style={{ fontSize: '9px' }} className="mt-0.5">Гарах</span>
+          </button>
         </div>
       </aside>
 
@@ -183,24 +171,24 @@ export default function Layout({ children }) {
                 {itemCount} зүйл
               </span>
             )}
-            {isCashier ? (
+            {isCashier && (
               <button
                 onClick={handleEndShift}
                 disabled={endingShift}
-                className="p-1.5 text-gray-400 hover:text-orange-400 transition-colors"
+                className="p-1.5 text-gray-400 hover:text-orange-400
+                           disabled:opacity-50 transition-colors"
                 title="Ээлж дуусгах"
               >
                 <Clock className="w-4 h-4" />
               </button>
-            ) : (
-              <button
-                onClick={handleLogout}
-                className="p-1.5 text-gray-400 hover:text-red-400 transition-colors"
-                title="Гарах"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
             )}
+            <button
+              onClick={handleLogout}
+              className="p-1.5 text-gray-400 hover:text-red-400 transition-colors"
+              title={isCashier ? 'Ээлж хаахгүйгээр гарах' : 'Гарах'}
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
         </div>
 
@@ -258,145 +246,6 @@ export default function Layout({ children }) {
         ))}
       </nav>
 
-      {/* ── Shift Receipt Modal ────────────────────────── */}
-      {shiftSummary && (
-        <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
-            {/* Print-only receipt */}
-            <div className="print:block hidden">
-              <ShiftReceiptPrint data={shiftSummary} cashierName={user?.full_name} brandName={brandName} />
-            </div>
-
-            {/* Screen view */}
-            <div className="print:hidden">
-              <div className="bg-gradient-to-r from-orange-500 to-amber-500 px-5 py-4 text-white">
-                <h3 className="font-bold">Тулгалтын баримт</h3>
-                <p className="text-sm text-orange-100 mt-1">{user?.full_name}</p>
-              </div>
-              <div className="p-5 space-y-3">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Эхэлсэн</span>
-                  <span className="font-medium">{new Date(shiftSummary.shift.started_at).toLocaleString('mn-MN')}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Дууссан</span>
-                  <span className="font-medium">{new Date(shiftSummary.shift.ended_at).toLocaleString('mn-MN')}</span>
-                </div>
-                <div className="border-t pt-3 space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">Нийт үйлчлүүлэгч</span>
-                    <span className="font-bold">{shiftSummary.total_customers}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">Нийт захиалга</span>
-                    <span className="font-bold">{shiftSummary.total_orders}</span>
-                  </div>
-                </div>
-                <div className="border-t pt-3 space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">Бэлэн мөнгө</span>
-                    <span className="font-bold">{shiftSummary.cash_total.toLocaleString()}₮</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">Шилжүүлэг</span>
-                    <span className="font-bold">{shiftSummary.transfer_total.toLocaleString()}₮</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">Карт</span>
-                    <span className="font-bold">{shiftSummary.card_total.toLocaleString()}₮</span>
-                  </div>
-                  {shiftSummary.late_total > 0 && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-orange-500">💰 Нөхөж авсан төлбөр</span>
-                      <span className="font-bold text-orange-600">
-                        +{shiftSummary.late_total.toLocaleString()}₮
-                      </span>
-                    </div>
-                  )}
-                  {shiftSummary.unpaid_total > 0 && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-red-500">⚠️ Төлбөр төлөөгүй</span>
-                      <span className="font-bold text-red-600">
-                        {shiftSummary.unpaid_total.toLocaleString()}₮
-                      </span>
-                    </div>
-                  )}
-                  <div className="border-t pt-2 flex justify-between text-base font-black">
-                    <span>НИЙТ (төлөгдсөн)</span>
-                    <span className="text-blue-600">{shiftSummary.total_revenue.toLocaleString()}₮</span>
-                  </div>
-                </div>
-                <button onClick={printAndLogout}
-                  className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-xl mt-2">
-                  Хэвлэх & Гарах
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-
-/* ── Shift Receipt for thermal printer (80mm) ── */
-function ShiftReceiptPrint({ data, cashierName, brandName }) {
-  const started = new Date(data.shift.started_at)
-  const ended = new Date(data.shift.ended_at)
-  const diffMs = ended - started
-  const hours = Math.floor(diffMs / 3600000)
-  const mins = Math.floor((diffMs % 3600000) / 60000)
-
-  const fmt = (d) => d.toLocaleString('mn-MN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' })
-
-  return (
-    <div style={{ width: '80mm', fontFamily: 'monospace', fontSize: '12px', padding: '4mm' }}>
-      <div style={{ textAlign: 'center', marginBottom: '8px' }}>
-        <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{(brandName || '').toUpperCase()}</div>
-        <div style={{ fontWeight: 'bold', fontSize: '13px', marginTop: '4px' }}>ТУЛГАЛТЫН БАРИМТ</div>
-      </div>
-      <div style={{ borderTop: '1px dashed #000', margin: '6px 0' }} />
-      <div>Касс: {cashierName}</div>
-      <div>Эхэлсэн: {fmt(started)}</div>
-      <div>Дууссан: {fmt(ended)}</div>
-      <div>Хугацаа: {hours}ц {mins}мин</div>
-      <div style={{ borderTop: '1px dashed #000', margin: '6px 0' }} />
-      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <span>Нийт үйлчлүүлэгч:</span><span>{data.total_customers}</span>
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <span>Нийт захиалга:</span><span>{data.total_orders}</span>
-      </div>
-      <div style={{ borderTop: '1px dashed #000', margin: '6px 0' }} />
-      <div style={{ fontWeight: 'bold' }}>ТӨЛБӨРИЙН ЗАДАРГАА:</div>
-      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <span>  Бэлэн мөнгө:</span><span>{data.cash_total.toLocaleString()}₮</span>
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <span>  Шилжүүлэг:</span><span>{data.transfer_total.toLocaleString()}₮</span>
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <span>  Карт:</span><span>{data.card_total.toLocaleString()}₮</span>
-      </div>
-      {data.late_total > 0 && (
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <span>  Нөхөж авсан:</span><span>+{data.late_total.toLocaleString()}₮</span>
-        </div>
-      )}
-      {data.unpaid_total > 0 && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
-          <span>  Төлбөр төлөөгүй:</span><span>{data.unpaid_total.toLocaleString()}₮</span>
-        </div>
-      )}
-      <div style={{ borderTop: '1px solid #000', margin: '6px 0' }} />
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '14px' }}>
-        <span>НИЙТ (төлөгдсөн):</span><span>{data.total_revenue.toLocaleString()}₮</span>
-      </div>
-      <div style={{ borderTop: '1px dashed #000', margin: '8px 0' }} />
-      <div style={{ marginTop: '16px' }}>Хүлээн авсан: _______________</div>
-      <div style={{ marginTop: '16px' }}>Хүлээлгэн өгсөн: ___________</div>
-      <div style={{ borderTop: '1px dashed #000', margin: '8px 0' }} />
     </div>
   )
 }

@@ -157,7 +157,22 @@ export const machinesApi = {
   usagesByOrder: (orderId)    => api.get(`/machines/usages-by-order/${orderId}`),
 }
 
-// ── Шүршүүр: Өрөөний төрөл ────────────────────────────────
+// ── Барааны ангилал (үйлчилгээнийхээс тусдаа) ────────
+export const productCategoriesApi = {
+  list:   (params = {}) => api.get('/product-categories/', { params }),
+  create: (data)     => api.post('/product-categories/', data),
+  update: (id, data) => api.put(`/product-categories/${id}`, data),
+  remove: (id)       => api.delete(`/product-categories/${id}`),
+}
+
+// ── Шүршүүр: Тариф ба өрөөний төрөл ────────
+export const showerTariffsApi = {
+  list:   (params = {}) => api.get('/shower-tariffs/', { params }),
+  create: (data)     => api.post('/shower-tariffs/', data),
+  update: (id, data) => api.put(`/shower-tariffs/${id}`, data),
+  remove: (id)       => api.delete(`/shower-tariffs/${id}`),
+}
+
 export const roomTypesApi = {
   list:   (params = {}) => api.get('/room-types/', { params }),
   create: (data)     => api.post('/room-types/', data),
@@ -177,7 +192,11 @@ export const roomsApi = {
   cleaningStart: (id)       => api.post(`/rooms/${id}/cleaning-start`),
   cleaningDone:  (id)       => api.post(`/rooms/${id}/cleaning-done`),
   waiting:       ()         => api.get('/room-sessions/waiting'),
-  assign:        (sid, roomId) => api.post(`/room-sessions/${sid}/assign`, { room_id: roomId }),
+  // Нэг буюу хэд хэдэн тасалбарыг НЭГ өрөөнд оруулна (гэр бүл хамт)
+  assign:        (sessionIds, roomId) => api.post('/room-sessions/assign', {
+                   session_ids: Array.isArray(sessionIds) ? sessionIds : [sessionIds],
+                   room_id: roomId,
+                 }),
   cancelTicket:  (sid)      => api.post(`/room-sessions/${sid}/cancel`),
   noShow:        (sid)      => api.post(`/room-sessions/${sid}/no-show`),
   arrived:       (sid)      => api.post(`/room-sessions/${sid}/arrived`),
@@ -221,6 +240,7 @@ export const settingsApi = {
 // ── Shifts ────────────────────────────────────────────────
 export const shiftsApi = {
   active:   ()           => api.get('/shifts/active'),
+  my:       ()           => api.get('/shifts/my'),
   start:    ()           => api.post('/shifts/start'),
   end:      ()           => api.post('/shifts/end'),
   history:  (params = {}) => api.get('/shifts/history', { params }),

@@ -33,6 +33,16 @@ const PAYMENT_INFO = {
   unpaid:   { label: 'Төлбөр төлөөгүй', color: 'bg-red-100 text-red-700',    icon: AlertTriangle  },
 }
 
+// Төлсөн төлбөрийн хэлбэрээр шүүх
+const PAY_FILTERS = [
+  { value: '',         label: 'Бүх төлбөр' },
+  { value: 'cash',     label: 'Бэлэн'      },
+  { value: 'transfer', label: 'Шилжүүлэг'  },
+  { value: 'card',     label: 'Карт'       },
+  { value: 'mixed',    label: 'Холимог'    },
+  { value: 'unpaid',   label: 'Төлөгдөөгүй' },
+]
+
 export default function HistoryPage() {
   const isAdmin = useAuthStore(s => s.isAdmin)()
   const today = dayjs().format('YYYY-MM-DD')
@@ -47,6 +57,7 @@ export default function HistoryPage() {
   const [loading,     setLoading]     = useState(false)
   const [activeQuick, setActiveQuick] = useState(0)
   const [kind,        setKind]        = useState('')  // '' | 'laundry' | 'shower'
+  const [payMethod,   setPayMethod]   = useState('')  // '' = бүх төлбөр
   const [expandedId,  setExpandedId]  = useState(null)
   const [usagesMap,   setUsagesMap]   = useState({})  // orderId → usages[]
 
@@ -61,10 +72,14 @@ export default function HistoryPage() {
     }
   }
 
-  const fetchOrders = async (from, to, k = kind) => {
+  const fetchOrders = async (from, to, k = kind, pm = payMethod) => {
     setLoading(true)
     try {
-      const base = { date_from: from, date_to: to, ...(k ? { kind: k } : {}) }
+      const base = {
+        date_from: from, date_to: to,
+        ...(k  ? { kind: k }            : {}),
+        ...(pm ? { payment_method: pm } : {}),
+      }
       const promises = [
         // Хугацааны бүх захиалга (устгагдсанаас бусад) — төлөв нь мөр бүр дээр харагдана
         ordersApi.list(base),
@@ -106,6 +121,11 @@ export default function HistoryPage() {
   const applyKind = (k) => {
     setKind(k)
     fetchOrders(dateFrom, dateTo, k)
+  }
+
+  const applyPay = (pm) => {
+    setPayMethod(pm)
+    fetchOrders(dateFrom, dateTo, kind, pm)
   }
 
   const activeOrders  = orders.filter(o => o.status !== 'deleted')
@@ -167,6 +187,22 @@ export default function HistoryPage() {
                   : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
             >
               {k.label}
+            </button>
+          ))}
+
+          <span className="w-px h-5 bg-gray-200 mx-1" />
+
+          {/* Төлсөн төлбөрийн хэлбэрээр шүүх */}
+          {PAY_FILTERS.map(p => (
+            <button
+              key={p.value}
+              onClick={() => applyPay(p.value)}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all border
+                ${payMethod === p.value
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}
+            >
+              {p.label}
             </button>
           ))}
         </div>
@@ -428,6 +464,11 @@ function OrderRow({ order, expanded, onToggle, usages, isAdmin, onDelete, onUpda
   )
   const preview = itemNames.slice(0, 2).join(', ') + (itemNames.length > 2 ? ` +${itemNames.length - 2}` : '')
 
+  // Шүршүүрийн захиалгын оочирын дугаарууд (хүн тус бүрд нэг)
+  const queueNos = (order.sessions || [])
+    .slice()
+    .sort((a, b) => a.queue_no - b.queue_no)
+
   const isDeleted = order.status === 'deleted'
   const isFlagged = order.is_flagged && !isDeleted
 
@@ -513,6 +554,23 @@ function OrderRow({ order, expanded, onToggle, usages, isAdmin, onDelete, onUpda
           </span>
         </div>
 
+        {/* Оочирын дугаарууд — зөвхөн шүршүүрийн захиалгад */}
+        {queueNos.length > 0 && (
+          <div className="flex items-center gap-1 flex-wrap mt-1">
+            <span className="text-[10px] text-gray-400 mr-0.5">Оочир:</span>
+            {queueNos.map(s => (
+              <span
+                key={s.id}
+                title={s.type_name || ''}
+                className="text-[11px] font-black tabular-nums text-amber-700
+                           bg-amber-50 border border-amber-200 px-1.5 rounded"
+              >
+                №{String(s.queue_no).padStart(3, '0')}
+              </span>
+            ))}
+          </div>
+        )}
+
         {/* Row 3: items preview + note indicator */}
         <div className="flex items-center gap-1.5 mt-0.5">
           {preview && (
@@ -554,6 +612,8 @@ function OrderRow({ order, expanded, onToggle, usages, isAdmin, onDelete, onUpda
                 const isProduct = item.item_type === 'product'
                 const name = item.item_name || item.service?.name || item.product?.name || '—'
                 const usage = usages.find(u => u.order_item_id === item.id)
+                // Шүршүүрийн мөр — тухайн мөрөөс үүссэн тасалбаруудын оочир
+                const lineQueue = queueNos.filter(s => s.order_item_id === item.id)
                 return (
                   <div key={i}
                        className={`flex items-center gap-3 px-3 py-2 text-sm
@@ -565,6 +625,13 @@ function OrderRow({ order, expanded, onToggle, usages, isAdmin, onDelete, onUpda
                         : <span className="w-2 h-2 rounded-full bg-blue-400 shrink-0" />
                       }
                       <span className="text-gray-700 font-medium truncate">{name}</span>
+                      {lineQueue.map(s => (
+                        <span key={s.id}
+                              className="text-[10px] font-black tabular-nums text-amber-700
+                                         bg-amber-50 border border-amber-200 px-1 rounded shrink-0">
+                          №{String(s.queue_no).padStart(3, '0')}
+                        </span>
+                      ))}
                       {item.notes && (
                         <span className="text-xs text-gray-400 italic truncate">({item.notes})</span>
                       )}

@@ -1,23 +1,37 @@
 import { useState } from 'react'
-import { X, LogIn, Clock, ShowerHead, UserX, UserCheck } from 'lucide-react'
+import { X, LogIn, Clock, ShowerHead, UserX, UserCheck, Check } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { roomsApi } from '../api/client'
 import { useElapsed } from '../hooks/useCountdown'
 import { roomStatus, queueLabel } from './RoomMap'
 
 
-/* ── Сул өрөө оноох цонх ──────────────────────────────── */
-export function AdmitModal({ session, rooms, onClose, onAssigned }) {
+/* ── Сул өрөө оноох цонх ──────────────────────────────────
+   ХЭД ХЭДЭН хүнийг НЭГ өрөөнд хамт оруулж болно:
+     · Том хүн + Сургуулийн хүүхэд  → 2 хүний өрөө
+     · Том хүн + Цэцэрлэгийн хүүхэд → 1 хүний өрөө
+   Багтаамжийн хатуу хязгаарлалт байхгүй — үйлчлэгч өөрөө шийднэ.   */
+export function AdmitModal({ session, waiting = [], rooms, onClose, onAssigned }) {
   const [busy, setBusy] = useState(false)
+  const [picked, setPicked] = useState([session.id])
+
   const free = rooms.filter(r => r.is_active && roomStatus(r) === 'free')
-  const matching = free.filter(r => r.room_type_id === session.room_type_id)
-  const others   = free.filter(r => r.room_type_id !== session.room_type_id)
+  // Дарсан хүн эхэнд, бусад нь ард (ирээгүй хүмүүсийг оруулахгүй)
+  const candidates = [session, ...waiting.filter(w => w.id !== session.id && !w.no_show)]
+  const chosen = candidates.filter(w => picked.includes(w.id))
+
+  const toggle = (id) => setPicked(p => {
+    if (!p.includes(id)) return [...p, id]
+    if (p.length === 1) return p          // хамгийн багадаа 1 хүн үлдэнэ
+    return p.filter(x => x !== id)
+  })
 
   const assign = async (room) => {
     setBusy(true)
     try {
-      await roomsApi.assign(session.id, room.id)
-      toast.success(`Оочир ${queueLabel(session.queue_no)} → Өрөө №${room.number}`)
+      await roomsApi.assign(picked, room.id)
+      const nums = chosen.map(c => queueLabel(c.queue_no)).join(', ')
+      toast.success(`Оочир ${nums} → Өрөө №${room.number}`)
       onAssigned?.()
       onClose()
     } catch {
@@ -27,52 +41,121 @@ export function AdmitModal({ session, rooms, onClose, onAssigned }) {
     }
   }
 
-  const RoomBtn = ({ room, highlight }) => (
-    <button
-      key={room.id}
-      disabled={busy}
-      onClick={() => assign(room)}
-      className={`p-3 rounded-xl border-2 text-left transition-all hover:shadow-md disabled:opacity-50
-                  ${highlight ? 'border-green-400 bg-green-50 ring-1 ring-green-300' : 'border-gray-200 bg-white'}`}
-    >
-      <div className="font-bold text-gray-800">Өрөө №{room.number}</div>
-      <div className="text-xs text-gray-500">{room.room_type?.name}</div>
-    </button>
-  )
+  // Өрөөнүүдийг төрлөөр нь бүлэглэнэ — зөвхөн зөвлөмж, хатуу шалгалтгүй
+  const byType = free.reduce((acc, r) => {
+    const name = r.room_type?.name || 'Бусад'
+    ;(acc[name] ||= []).push(r)
+    return acc
+  }, {})
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl w-full max-w-md max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between p-4 border-b border-gray-200">
-          <div>
-            <h3 className="font-bold text-gray-800">Өрөө оруулах</h3>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Оочир {queueLabel(session.queue_no)} · {session.type_name} · {session.customer_name}
-            </p>
-          </div>
+      <div className="bg-white rounded-2xl w-full max-w-lg max-h-[88vh] flex flex-col"
+           onClick={e => e.stopPropagation()}>
+
+        {/* Толгой */}
+        <div className="flex items-center justify-between p-4 border-b border-gray-200 shrink-0">
+          <h3 className="font-bold text-gray-800">Өрөөнд оруулах</h3>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100"><X size={18} /></button>
         </div>
 
-        <div className="p-4 space-y-4">
-          {free.length === 0 && (
-            <div className="text-center text-sm text-gray-500 py-6">Сул өрөө одоогоор алга байна</div>
-          )}
-          {matching.length > 0 && (
-            <div>
-              <div className="text-xs font-medium text-green-700 mb-2">Тохирох төрөл</div>
-              <div className="grid grid-cols-2 gap-2">
-                {matching.map(r => <RoomBtn key={r.id} room={r} highlight />)}
-              </div>
+        <div className="p-4 space-y-5 overflow-y-auto">
+
+          {/* ── 1-р алхам: хэн орох вэ ── */}
+          <div>
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <span className="flex items-center gap-2 text-sm font-bold text-gray-800">
+                <span className="w-5 h-5 rounded-full bg-cyan-600 text-white text-[11px]
+                                 flex items-center justify-center font-bold">1</span>
+                Хэн орох вэ?
+              </span>
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-cyan-100 text-cyan-700">
+                {picked.length} хүн сонгосон
+              </span>
             </div>
-          )}
-          {others.length > 0 && (
-            <div>
-              <div className="text-xs font-medium text-gray-500 mb-2">Өөр төрөл — кассчин шийднэ</div>
-              <div className="grid grid-cols-2 gap-2">
-                {others.map(r => <RoomBtn key={r.id} room={r} />)}
-              </div>
+            <p className="text-xs text-gray-400 mb-2">
+              Хамт орох хүмүүсээ дарж сонгоно уу — хэдэн ч хүнийг нэг өрөөнд оруулж болно
+            </p>
+
+            <div className="space-y-1.5">
+              {candidates.map(w => {
+                const on = picked.includes(w.id)
+                return (
+                  <button
+                    key={w.id}
+                    onClick={() => toggle(w.id)}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border-2
+                                text-left transition-all
+                      ${on ? 'border-cyan-500 bg-cyan-50'
+                           : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'}`}
+                  >
+                    <span className={`w-5 h-5 rounded-md border-2 shrink-0 flex items-center justify-center
+                      ${on ? 'bg-cyan-600 border-cyan-600' : 'border-gray-300 bg-white'}`}>
+                      {on && <Check size={13} className="text-white" strokeWidth={3} />}
+                    </span>
+                    <span className="font-black text-amber-700 bg-amber-50 border border-amber-200
+                                     px-1.5 rounded tabular-nums text-sm shrink-0">
+                      {queueLabel(w.queue_no)}
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <span className={`block text-sm font-semibold truncate
+                                        ${on ? 'text-cyan-800' : 'text-gray-700'}`}>
+                        {w.type_name}
+                      </span>
+                      {w.customer_name && (
+                        <span className="block text-xs text-gray-400 truncate">{w.customer_name}</span>
+                      )}
+                    </span>
+                  </button>
+                )
+              })}
             </div>
-          )}
+            {candidates.length === 1 && (
+              <p className="text-xs text-gray-400 mt-1.5">Дараалалд өөр хүн алга</p>
+            )}
+          </div>
+
+          {/* ── 2-р алхам: аль өрөөнд ── */}
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="w-5 h-5 rounded-full bg-cyan-600 text-white text-[11px]
+                               flex items-center justify-center font-bold">2</span>
+              <span className="text-sm font-bold text-gray-800">Аль өрөөнд оруулах вэ?</span>
+            </div>
+            <p className="text-xs text-gray-400 mb-2">
+              Өрөө дарахад сонгосон {picked.length} хүн шууд орно
+            </p>
+
+            {free.length === 0 ? (
+              <div className="text-center text-sm text-gray-500 py-6 rounded-xl
+                              border border-dashed border-gray-200">
+                Сул өрөө одоогоор алга байна
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {Object.entries(byType).map(([name, list]) => (
+                  <div key={name}>
+                    <div className="text-[11px] text-gray-400 mb-1">{name}</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {list.map(r => (
+                        <button
+                          key={r.id}
+                          disabled={busy}
+                          onClick={() => assign(r)}
+                          className="p-3 rounded-xl border-2 border-gray-200 bg-white text-left
+                                     transition-all hover:shadow-md hover:border-cyan-400
+                                     active:scale-[0.98] disabled:opacity-50"
+                        >
+                          <div className="font-bold text-gray-800">Өрөө №{r.number}</div>
+                          <div className="text-xs text-gray-500">{r.room_type?.name}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -152,8 +235,8 @@ function QueueRow({ session, isNext, onAdmit, onCancel, onNoShow, onArrived, rea
 }
 
 
-/* ── Хүлээж буй дараалал — өрөөний ТӨРӨЛ бүрээр тусдаа ──── */
-export default function QueuePanel({ waiting = [], rooms = [], types = [], onRefresh, readOnly = false }) {
+/* ── Хүлээж буй дараалал — НЭГДСЭН (дугаарлалт өдөр бүр глобал) ── */
+export default function QueuePanel({ waiting = [], rooms = [], onRefresh, readOnly = false }) {
   const [admitting, setAdmitting] = useState(null)
 
   const handleCancel = async (session) => {
@@ -186,22 +269,12 @@ export default function QueuePanel({ waiting = [], rooms = [], types = [], onRef
     } catch {}
   }
 
-  // Төрлүүд мэдэгдэж байвал тэр эрэмбээр, үгүй бол дарааллаас нь гаргаж бүлэглэнэ
-  const groups = types.length
-    ? types.map(t => ({ id: t.id, name: t.name, color: t.color, items: waiting.filter(w => w.room_type_id === t.id) }))
-    : waiting.reduce((acc, s) => {
-        let g = acc.find(x => x.id === s.room_type_id)
-        if (!g) { g = { id: s.room_type_id, name: s.type_name, items: [] }; acc.push(g) }
-        g.items.push(s)
-        return acc
-      }, [])
-
-  const freeFor = (typeId) =>
-    rooms.filter(r => r.room_type_id === typeId && r.is_active && roomStatus(r) === 'free').length
+  const freeCount = rooms.filter(r => r.is_active && roomStatus(r) === 'free').length
+  const nextId    = waiting.find(x => !x.no_show)?.id
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-2 gap-2">
         <h3 className="text-sm font-bold text-gray-700 flex items-center gap-1.5">
           <ShowerHead size={15} className="text-cyan-600" />
           Хүлээж байна
@@ -209,51 +282,29 @@ export default function QueuePanel({ waiting = [], rooms = [], types = [], onRef
             <span className="px-1.5 py-0.5 rounded-md bg-cyan-100 text-cyan-700 text-xs">{waiting.length}</span>
           )}
         </h3>
+        <span className={`px-1.5 py-0.5 rounded-md font-medium text-xs
+                          ${freeCount > 0 ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500'}`}>
+          Сул өрөө {freeCount}
+        </span>
       </div>
 
-      {groups.length === 0 ? (
+      {waiting.length === 0 ? (
         <div className="text-center text-sm text-gray-400 py-6 rounded-xl border border-dashed border-gray-200">
           Дараалал хоосон байна
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-          {groups.map(g => (
-            <div key={g.id} className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-              <div className="flex items-center justify-between gap-2 mb-2">
-                <span className="text-sm font-bold text-gray-800 flex items-center gap-1.5 min-w-0">
-                  {g.color && <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: g.color }} />}
-                  <span className="truncate">{g.name}</span>
-                </span>
-                <span className="flex items-center gap-1.5 shrink-0 text-xs">
-                  <span className="px-1.5 py-0.5 rounded-md bg-cyan-100 text-cyan-700 font-medium">
-                    {g.items.length}
-                  </span>
-                  <span className={`px-1.5 py-0.5 rounded-md font-medium
-                                    ${freeFor(g.id) > 0 ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500'}`}>
-                    Сул {freeFor(g.id)}
-                  </span>
-                </span>
-              </div>
-
-              {g.items.length === 0 ? (
-                <div className="text-center text-xs text-gray-400 py-4">Хоосон</div>
-              ) : (
-                <div className="space-y-2">
-                  {g.items.map(s => (
-                    <QueueRow
-                      key={s.id}
-                      session={s}
-                      isNext={s.id === g.items.find(x => !x.no_show)?.id}
-                      readOnly={readOnly}
-                      onAdmit={setAdmitting}
-                      onCancel={handleCancel}
-                      onNoShow={handleNoShow}
-                      onArrived={handleArrived}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+          {waiting.map(s => (
+            <QueueRow
+              key={s.id}
+              session={s}
+              isNext={s.id === nextId}
+              readOnly={readOnly}
+              onAdmit={setAdmitting}
+              onCancel={handleCancel}
+              onNoShow={handleNoShow}
+              onArrived={handleArrived}
+            />
           ))}
         </div>
       )}
@@ -261,6 +312,7 @@ export default function QueuePanel({ waiting = [], rooms = [], types = [], onRef
       {admitting && (
         <AdmitModal
           session={admitting}
+          waiting={waiting}
           rooms={rooms}
           onClose={() => setAdmitting(null)}
           onAssigned={onRefresh}

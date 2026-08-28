@@ -6,6 +6,7 @@ import useBrandStore from './store/useBrandStore'
 import Layout         from './components/Layout'
 import LicenseGate    from './components/LicenseGate'
 import ProtectedRoute from './components/ProtectedRoute'
+import ShiftGate      from './components/ShiftGate'
 
 import LoginPage     from './pages/LoginPage'
 import POSPage       from './pages/POSPage'
@@ -51,6 +52,7 @@ export default function App() {
           path="/*"
           element={
             <ProtectedRoute>
+              <ShiftGate>
               <Layout>
                 <Routes>
                   {/* Кассчин + Админ */}
@@ -78,6 +80,7 @@ export default function App() {
                   } />
                 </Routes>
               </Layout>
+              </ShiftGate>
             </ProtectedRoute>
           }
         />

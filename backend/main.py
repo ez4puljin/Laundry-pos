@@ -13,10 +13,23 @@ from routers import license_api
 from routers import users as users_router
 from auth import get_current_user, require_admin, hash_password
 
-# Windows UTF-8 encoding засах
+# Windows UTF-8 encoding засах.
+# Аль хэдийн UTF-8 болсон урсгалыг дахин боохгүй — давхар боовол эхний
+# боолт цуглуулагдахдаа доод буферийг хааж "I/O operation on closed file"
+# алдаа өгдөг (жишээ нь main-г өөр скриптээс import хийхэд).
+def _force_utf8(stream_name: str):
+    stream = getattr(sys, stream_name)
+    if (getattr(stream, "encoding", "") or "").lower().replace("-", "") == "utf8":
+        return
+    buffer = getattr(stream, "buffer", None)
+    if buffer is not None:
+        setattr(sys, stream_name,
+                io.TextIOWrapper(buffer, encoding="utf-8", errors="replace"))
+
+
 if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+    _force_utf8("stdout")
+    _force_utf8("stderr")
 
 # ── DB үүсгэх ───────────────────────────────────────────
 models.Base.metadata.create_all(bind=engine)
@@ -233,6 +246,22 @@ def _migrate():
             """))
             conn.commit()
 
+    # cashier_shifts.scope — кассын төрөл (laundry | shower | master)
+    sh_cols = [c["name"] for c in inspect(engine).get_columns("cashier_shifts")]
+    if "scope" not in sh_cols:
+        with engine.connect() as conn:
+            conn.execute(text(
+                "ALTER TABLE cashier_shifts ADD COLUMN scope VARCHAR(20) "
+                "NOT NULL DEFAULT 'master'"
+            ))
+            # Хуучин ээлжүүдэд эзний одоогийн ажлын хүрээг оноож өгнө
+            conn.execute(text(
+                "UPDATE cashier_shifts SET scope = COALESCE("
+                "  (SELECT u.cashier_scope FROM users u WHERE u.id = cashier_shifts.user_id),"
+                "  'master')"
+            ))
+            conn.commit()
+
     # orders.cashier_id
     ord_cols3 = [c["name"] for c in inspect(engine).get_columns("orders")]
     if "cashier_id" not in ord_cols3:
@@ -260,6 +289,82 @@ def _migrate():
         with engine.connect() as conn:
             conn.execute(text("ALTER TABLE room_sessions ADD COLUMN no_show INTEGER DEFAULT 0"))
             conn.commit()
+        rs_cols.append("no_show")
+
+    # inventory — барааны ангилал (product_categories-ийг create_all үүсгэнэ)
+    inv_cols2 = [c["name"] for c in inspect(engine).get_columns("inventory")]
+    if "category_id" not in inv_cols2:
+        with engine.connect() as conn:
+            conn.execute(text(
+                "ALTER TABLE inventory ADD COLUMN category_id INTEGER "
+                "REFERENCES product_categories(id)"))
+            conn.commit()
+
+    # orders — НӨАТ талбарууд
+    ord_cols2 = [c["name"] for c in inspect(engine).get_columns("orders")]
+    with engine.connect() as conn:
+        if "vat_amount" not in ord_cols2:
+            conn.execute(text("ALTER TABLE orders ADD COLUMN vat_amount REAL DEFAULT 0.0"))
+            conn.commit()
+        if "product_vat" not in ord_cols2:
+            conn.execute(text("ALTER TABLE orders ADD COLUMN product_vat INTEGER DEFAULT 0"))
+            conn.commit()
+
+    # ── room_sessions-ийг дахин үүсгэх ────────────────────────────
+    #  Шалтгаан: (1) tariff_id багана нэмэх, (2) room_type_id-г NULL
+    #  зөвшөөрөх (өрөө оноогдох үед л тодорно), (3) ux_room_sessions_active_room
+    #  unique index-ийг УСТГАХ — нэг өрөөнд олон хүн зэрэг орж болох болсон.
+    #  SQLite багана өөрчилж/индекс буулгаж чаддаггүй тул хүснэгтийг сэлгэнэ.
+    if "tariff_id" not in rs_cols:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE room_sessions_new (
+                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                    room_id             INTEGER REFERENCES rooms(id),
+                    room_type_id        INTEGER REFERENCES room_types(id),
+                    tariff_id           INTEGER REFERENCES shower_tariffs(id),
+                    order_id            INTEGER NOT NULL REFERENCES orders(id),
+                    order_item_id       INTEGER REFERENCES order_items(id),
+                    queue_no            INTEGER NOT NULL DEFAULT 0,
+                    room_number         VARCHAR(20),
+                    type_name           VARCHAR(100),
+                    customer_name       VARCHAR(100),
+                    price               FLOAT NOT NULL,
+                    duration_min        INTEGER NOT NULL,
+                    status              VARCHAR(20),
+                    no_show             INTEGER DEFAULT 0,
+                    created_at          DATETIME,
+                    started_at          DATETIME,
+                    ended_at            DATETIME,
+                    cleaning_started_at DATETIME,
+                    cleaned_at          DATETIME,
+                    cleaned_by_id       INTEGER REFERENCES users(id),
+                    cleaned_by          VARCHAR(100)
+                )
+            """))
+            conn.execute(text("""
+                INSERT INTO room_sessions_new
+                    (id, room_id, room_type_id, order_id, order_item_id, queue_no,
+                     room_number, type_name, customer_name, price, duration_min,
+                     status, no_show, created_at, started_at, ended_at,
+                     cleaning_started_at, cleaned_at, cleaned_by_id, cleaned_by)
+                SELECT
+                     id, room_id, room_type_id, order_id, order_item_id, queue_no,
+                     room_number, type_name, customer_name, price, duration_min,
+                     status, no_show, created_at, started_at, ended_at,
+                     cleaning_started_at, cleaned_at, cleaned_by_id, cleaned_by
+                FROM room_sessions
+            """))
+            conn.execute(text("DROP TABLE room_sessions"))
+            conn.execute(text("ALTER TABLE room_sessions_new RENAME TO room_sessions"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_room_sessions_status "
+                "ON room_sessions (status)"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_room_sessions_id "
+                "ON room_sessions (id)"))
+            conn.commit()
+        print("room_sessions rebuilt (tariff_id, nullable room_type_id, no unique index)")
 
     # Зөвхөн шүршүүрээс бүрдсэн хуучин захиалгуудыг «олгосон» болгоно.
     # Эдгээрт угаалгын ажил байхгүй тул дараалалд хүлээх шаардлагагүй бөгөөд
@@ -329,17 +434,31 @@ def _seed():
             db.commit()
             print("Default fin accounts created (Касс, Банк)")
 
-        # ── Шүршүүрийн өрөөний төрөл ──────────────────────
+        # ── Шүршүүрийн өрөөний төрөл (тарифгүй — зөвхөн багтаамж) ──
         # Өрөөнүүдийг seed хийхгүй — Удирдлага цэснээс зурж үүсгэнэ
         if db.query(models.RoomType).count() == 0:
             room_types_data = [
-                dict(name="1 хүний", price=5000, duration_min=60, color="#38bdf8", sort_order=0),
-                dict(name="2 хүний", price=8000, duration_min=60, color="#a78bfa", sort_order=1),
+                dict(name="1 хүний", price=0, duration_min=60, color="#38bdf8", sort_order=0),
+                dict(name="2 хүний", price=0, duration_min=60, color="#a78bfa", sort_order=1),
             ]
             for rt in room_types_data:
                 db.add(models.RoomType(**rt))
             db.commit()
             print("Default room types created (2)")
+
+        # ── Шүршүүрийн тариф (хүний төрөл) ────────────────
+        # Үнийг Удирдлага → Шүршүүрийн тариф цэснээс засна
+        if db.query(models.ShowerTariff).count() == 0:
+            # Үнэ нь НӨАТ БАГТСАН дүн. Хугацаа энд байхгүй — өрөөний төрөл дээр.
+            tariffs_data = [
+                dict(name="Том хүн",              price=5000, color="#38bdf8", sort_order=0),
+                dict(name="Сургуулийн хүүхэд",    price=3000, color="#a78bfa", sort_order=1),
+                dict(name="Цэцэрлэгийн хүүхэд",   price=2000, color="#34d399", sort_order=2),
+            ]
+            for t in tariffs_data:
+                db.add(models.ShowerTariff(**t))
+            db.commit()
+            print("Default shower tariffs created (3)")
     except Exception as e:
         print(f"Seed error: {e}")
         db.rollback()
@@ -430,6 +549,8 @@ app.include_router(reports.router,    dependencies=[Depends(require_admin)])
 app.include_router(categories.router)
 # Inventory: GET нь бүх user, POST/PATCH/DELETE нь admin (router дотроо тодорхойлно)
 app.include_router(inventory.router)
+# Барааны ангилал (үйлчилгээнийхээс тусдаа)
+app.include_router(inventory.categories_router)
 # Machines: any authenticated user
 app.include_router(machines.router, dependencies=[Depends(get_current_user)])
 # Settings: GET нь бүх user, PUT нь admin (router дотроо тодорхойлно)
@@ -439,6 +560,7 @@ app.include_router(settings.public_router)
 # Shifts: authenticated users
 app.include_router(shifts.router, dependencies=[Depends(get_current_user)])
 # Шүршүүр: CRUD нь admin (router дотроо), унших/шилжилт нь нэвтэрсэн хэрэглэгч
+app.include_router(rooms.tariffs_router,  dependencies=[Depends(get_current_user)])
 app.include_router(rooms.types_router,    dependencies=[Depends(get_current_user)])
 app.include_router(rooms.router,          dependencies=[Depends(get_current_user)])
 app.include_router(rooms.sessions_router, dependencies=[Depends(get_current_user)])

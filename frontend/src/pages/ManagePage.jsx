@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Plus, Edit2, Trash2, AlertTriangle, ToggleLeft, ToggleRight, Package, Wrench, Tag, Settings, Ticket, MessageSquare, Star, Receipt, ShowerHead, DoorOpen, Save, Eraser, MousePointerClick, Building2 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { servicesApi, inventoryApi, categoriesApi, machinesApi, ordersApi, settingsApi, roomsApi, roomTypesApi } from '../api/client'
+import { servicesApi, inventoryApi, categoriesApi, machinesApi, ordersApi, settingsApi, roomsApi, roomTypesApi, showerTariffsApi, productCategoriesApi } from '../api/client'
 import { GRID_COLS, GRID_ROWS } from '../components/RoomMap'
 import useBrandStore from '../store/useBrandStore'
 
@@ -26,8 +26,51 @@ const COLOR_PRESETS = [
 ]
 
 // ══════════════════════════════════════════════════════════
+//  Удирдлагын цэс — 4 бүлэг, бүлэг тус бүр дэд табтай
+// ══════════════════════════════════════════════════════════
+const GROUPS = [
+  {
+    id: 'laundry', label: 'Угаалга', icon: Wrench,
+    accent: 'bg-blue-600', ring: 'ring-blue-200', soft: 'bg-blue-50 text-blue-700',
+    tabs: [
+      { id: 'services',   label: 'Угаалгын үйлчилгээ', icon: Wrench },
+      { id: 'categories', label: 'Үйлчилгээний ангилал', icon: Tag },
+      { id: 'machines',   label: 'Угаалгын машин', icon: Settings },
+    ],
+  },
+  {
+    id: 'goods', label: 'Бараа', icon: Package,
+    accent: 'bg-green-600', ring: 'ring-green-200', soft: 'bg-green-50 text-green-700',
+    tabs: [
+      { id: 'inventory',  label: 'Бараа материал', icon: Package },
+      { id: 'prodcats',   label: 'Барааны ангилал', icon: Tag },
+    ],
+  },
+  {
+    id: 'shower', label: 'Шүршүүр', icon: ShowerHead,
+    accent: 'bg-cyan-600', ring: 'ring-cyan-200', soft: 'bg-cyan-50 text-cyan-700',
+    tabs: [
+      { id: 'tariffs',   label: 'Шүршүүрийн тариф', icon: ShowerHead },
+      { id: 'roomtypes', label: 'Өрөөний төрөл', icon: DoorOpen },
+      { id: 'rooms',     label: 'Өрөөний байршил', icon: MousePointerClick },
+    ],
+  },
+  {
+    id: 'settings', label: 'Тохиргоо', icon: Settings,
+    accent: 'bg-slate-700', ring: 'ring-slate-200', soft: 'bg-slate-100 text-slate-700',
+    tabs: [
+      { id: 'coupons', label: 'Купон', icon: Ticket },
+      { id: 'points',  label: 'Оноо', icon: Star },
+      { id: 'brand',   label: 'Байгууллагын нэр', icon: Building2 },
+      { id: 'receipt', label: 'Баримт загвар', icon: Receipt },
+      { id: 'sms',     label: 'SMS Gateway', icon: MessageSquare },
+    ],
+  },
+]
+
 export default function ManagePage() {
-  const [tab, setTab]             = useState('services')
+  const [group, setGroup]           = useState('laundry')
+  const [tab, setTab]               = useState('services')
   const [categories, setCategories] = useState([])
 
   const loadCategories = () =>
@@ -35,40 +78,68 @@ export default function ManagePage() {
 
   useEffect(() => { loadCategories() }, [])
 
+  const activeGroup = GROUPS.find(g => g.id === group) || GROUPS[0]
+
+  // Бүлэг солиход тухайн бүлгийн эхний таб руу шилжинэ
+  const pickGroup = (g) => {
+    setGroup(g.id)
+    if (!g.tabs.some(x => x.id === tab)) setTab(g.tabs[0].id)
+  }
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Tab header — horizontal scroll on mobile */}
-      <div className="bg-white border-b px-2 flex shrink-0 overflow-x-auto gap-1 py-1.5 scrollbar-hide">
-        <TabBtn active={tab === 'services'} onClick={() => setTab('services')}
-          icon={<Wrench className="w-3.5 h-3.5" />} label="Үйлчилгээ" />
-        <TabBtn active={tab === 'inventory'} onClick={() => setTab('inventory')}
-          icon={<Package className="w-3.5 h-3.5" />} label="Бараа" />
-        <TabBtn active={tab === 'categories'} onClick={() => setTab('categories')}
-          icon={<Tag className="w-3.5 h-3.5" />} label="Ангилал" />
-        <TabBtn active={tab === 'machines'} onClick={() => setTab('machines')}
-          icon={<Settings className="w-3.5 h-3.5" />} label="Машин" />
-        <TabBtn active={tab === 'roomtypes'} onClick={() => setTab('roomtypes')}
-          icon={<DoorOpen className="w-3.5 h-3.5" />} label="Өрөөний төрөл" />
-        <TabBtn active={tab === 'rooms'} onClick={() => setTab('rooms')}
-          icon={<ShowerHead className="w-3.5 h-3.5" />} label="Шүршүүр" />
-        <TabBtn active={tab === 'coupons'} onClick={() => setTab('coupons')}
-          icon={<Ticket className="w-3.5 h-3.5" />} label="Купон" />
-        <TabBtn active={tab === 'points'} onClick={() => setTab('points')}
-          icon={<Star className="w-3.5 h-3.5" />} label="Оноо" />
-        <TabBtn active={tab === 'brand'} onClick={() => setTab('brand')}
-          icon={<Building2 className="w-3.5 h-3.5" />} label="Байгууллага" />
-        <TabBtn active={tab === 'receipt'} onClick={() => setTab('receipt')}
-          icon={<Receipt className="w-3.5 h-3.5" />} label="Баримт" />
-        <TabBtn active={tab === 'sms'} onClick={() => setTab('sms')}
-          icon={<MessageSquare className="w-3.5 h-3.5" />} label="SMS" />
+
+      {/* ── 1-р түвшин: бүлэг ── */}
+      <div className="bg-white border-b px-3 pt-2.5 shrink-0">
+        <div className="flex gap-1.5 overflow-x-auto scrollbar-hide">
+          {GROUPS.map(g => {
+            const on = g.id === group
+            const Icon = g.icon
+            return (
+              <button
+                key={g.id}
+                onClick={() => pickGroup(g)}
+                className={`flex items-center gap-1.5 px-3.5 sm:px-5 py-2 text-sm font-bold
+                            rounded-t-xl whitespace-nowrap shrink-0 transition-all border-b-2
+                            ${on
+                              ? `${g.soft} border-current`
+                              : 'text-gray-400 border-transparent hover:text-gray-600 hover:bg-gray-50'}`}
+              >
+                <Icon className="w-4 h-4" />
+                {g.label}
+                <span className={`text-[10px] font-semibold px-1.5 rounded-full
+                                  ${on ? 'bg-white/70' : 'bg-gray-100 text-gray-400'}`}>
+                  {g.tabs.length}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* ── 2-р түвшин: дэд таб ── */}
+      <div className="bg-gray-50 border-b px-3 py-2 shrink-0
+                      flex gap-1.5 overflow-x-auto scrollbar-hide">
+        {activeGroup.tabs.map(x => (
+          <TabBtn
+            key={x.id}
+            active={tab === x.id}
+            accent={activeGroup.accent}
+            onClick={() => setTab(x.id)}
+            icon={<x.icon className="w-3.5 h-3.5" />}
+            label={x.label}
+          />
+        ))}
       </div>
 
       {/* Tab content */}
       <div className="flex-1 overflow-y-auto bg-gray-50">
         {tab === 'services'   && <ServicesTab categories={categories} />}
-        {tab === 'inventory'  && <InventoryTab />}
         {tab === 'categories' && <CategoriesTab categories={categories} onRefresh={loadCategories} />}
         {tab === 'machines'   && <MachinesTab />}
+        {tab === 'inventory'  && <InventoryTab />}
+        {tab === 'prodcats'   && <ProductCategoriesTab />}
+        {tab === 'tariffs'    && <ShowerTariffsTab />}
         {tab === 'roomtypes'  && <RoomTypesTab />}
         {tab === 'rooms'      && <RoomsTab />}
         {tab === 'coupons'    && <CouponsTab />}
@@ -81,14 +152,15 @@ export default function ManagePage() {
   )
 }
 
-function TabBtn({ active, onClick, icon, label }) {
+function TabBtn({ active, onClick, icon, label, accent = 'bg-blue-600' }) {
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1 px-2.5 sm:px-4 py-2 text-xs font-semibold rounded-xl whitespace-nowrap transition-all shrink-0
+      className={`flex items-center gap-1.5 px-3 sm:px-4 py-1.5 text-xs font-semibold
+                  rounded-lg whitespace-nowrap transition-all shrink-0
         ${active
-          ? 'bg-blue-600 text-white shadow-sm'
-          : 'text-gray-500 hover:bg-gray-100'}`}
+          ? `${accent} text-white shadow-sm`
+          : 'text-gray-500 bg-white border border-gray-200 hover:bg-gray-100'}`}
     >
       {icon}{label}
     </button>
@@ -441,18 +513,24 @@ function InventoryTab() {
   const [adjustQty, setAdjustQty]   = useState('')
   const [form, setForm] = useState({
     name: '', unit: 'кг', quantity: '', min_quantity: '1',
-    cost_price: '', sale_price: '', is_for_sale: false, supplier: ''
+    cost_price: '', sale_price: '', is_for_sale: false, supplier: '', category_id: ''
   })
+
+  const [prodCats, setProdCats] = useState([])
 
   const fetch = () => inventoryApi.list().then(r => setItems(r.data))
 
-  useEffect(() => { fetch() }, [])
+  useEffect(() => {
+    fetch()
+    productCategoriesApi.list({ active_only: true })
+      .then(r => setProdCats(r.data || [])).catch(() => {})
+  }, [])
 
   const openCreate = () => {
     setEditing(null)
     setForm({
       name: '', unit: 'кг', quantity: '', min_quantity: '1',
-      cost_price: '', sale_price: '', is_for_sale: false, supplier: ''
+      cost_price: '', sale_price: '', is_for_sale: false, supplier: '', category_id: ''
     })
     setShowModal(true)
   }
@@ -468,6 +546,7 @@ function InventoryTab() {
       sale_price:   String(item.sale_price),
       is_for_sale:  item.is_for_sale,
       supplier:     item.supplier || '',
+      category_id:  item.category_id ? String(item.category_id) : '',
     })
     setShowModal(true)
   }
@@ -481,6 +560,7 @@ function InventoryTab() {
       cost_price:   parseFloat(form.cost_price)   || 0,
       sale_price:   parseFloat(form.sale_price)   || 0,
       is_for_sale:  form.is_for_sale,
+      category_id:  form.category_id ? parseInt(form.category_id) : null,
     }
     if (data.is_for_sale && data.sale_price <= 0) {
       return toast.error('POS-оос зарахын тулд зарах үнэ оруулна уу')
@@ -617,6 +697,7 @@ function InventoryTab() {
             <thead>
               <tr className="bg-gray-50 border-b text-xs font-semibold text-gray-500 uppercase tracking-wide">
                 <th className="text-left px-5 py-3">Барааны нэр</th>
+                <th className="text-left px-5 py-3">Ангилал</th>
                 <th className="text-right px-5 py-3">Үлдэгдэл</th>
                 <th className="text-right px-5 py-3">Доод хэмжээ</th>
                 <th className="text-right px-5 py-3">Өртөг үнэ</th>
@@ -633,6 +714,16 @@ function InventoryTab() {
                   <td className="px-5 py-3">
                     <p className="font-medium text-sm text-gray-800">{item.name}</p>
                     <p className="text-xs text-gray-400">{item.unit}</p>
+                  </td>
+                  <td className="px-5 py-3">
+                    {item.category ? (
+                      <span className="inline-flex items-center gap-1.5 text-xs font-medium
+                                       px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">
+                        <span className="w-2 h-2 rounded-full"
+                              style={{ background: item.category.color }} />
+                        {item.category.name}
+                      </span>
+                    ) : <span className="text-xs text-gray-300">—</span>}
                   </td>
                   <td className={`px-5 py-3 text-right font-bold text-sm
                     ${item.is_low ? 'text-red-600' : 'text-gray-800'}`}>
@@ -752,6 +843,20 @@ function InventoryTab() {
                   />
                 </Field>
               </div>
+              <Field label="Ангилал">
+                <select className="input" value={form.category_id}
+                  onChange={e => setForm(p => ({ ...p, category_id: e.target.value }))}>
+                  <option value="">— Ангилалгүй —</option>
+                  {prodCats.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+                {prodCats.length === 0 && (
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    Барааны ангилал таб дээрээс эхлээд ангилал нэмнэ үү
+                  </p>
+                )}
+              </Field>
             </>
           )}
           <div className="grid grid-cols-2 gap-3">
@@ -1289,73 +1394,83 @@ export function Field({ label, children }) {
 // ══════════════════════════════════════════════════════════
 const ROOM_COLOR_PRESETS = ['#38bdf8', '#a78bfa', '#fb923c', '#34d399', '#f472b6', '#facc15']
 
-function RoomTypesTab() {
-  const [rows, setRows]         = useState([])
-  const [showModal, setShow]    = useState(false)
-  const [editing, setEditing]   = useState(null)
-  const [form, setForm]         = useState({ name: '', price: '', duration_min: '60', color: ROOM_COLOR_PRESETS[0], sort_order: '0' })
+/**
+ * Нэр + хугацаа + өнгө + эрэмбэтэй жагсаалтын CRUD таб.
+ * Шүршүүрийн тариф (үнэтэй) ба өрөөний төрөл (үнэгүй) хоёулаа үүнийг ашиглана.
+ */
+function ColorListTab({ api, title, subtitle, addLabel, namePlaceholder,
+                        withPrice = false, pricePlaceholder = '5000',
+                        withDuration = false, emptyText }) {
+  const blank = { name: '', price: '', duration_min: '60', color: ROOM_COLOR_PRESETS[0], sort_order: '0' }
+  const [rows, setRows]      = useState([])
+  const [showModal, setShow] = useState(false)
+  const [editing, setEditing] = useState(null)
+  const [form, setForm]      = useState(blank)
 
-  const fetch = () => roomTypesApi.list({ active_only: false }).then(r => setRows(r.data)).catch(() => {})
-  useEffect(() => { fetch() }, [])
+  const fetch = () => api.list({ active_only: false }).then(r => setRows(r.data)).catch(() => {})
+  useEffect(() => { fetch() }, [api])
 
   const openCreate = () => {
     setEditing(null)
-    setForm({ name: '', price: '', duration_min: '60', color: ROOM_COLOR_PRESETS[0], sort_order: String(rows.length) })
+    setForm({ ...blank, sort_order: String(rows.length) })
     setShow(true)
   }
 
   const openEdit = (row) => {
     setEditing(row)
     setForm({
-      name: row.name, price: String(row.price), duration_min: String(row.duration_min),
-      color: row.color, sort_order: String(row.sort_order),
+      name: row.name,
+      price: withPrice ? String(row.price ?? '') : '',
+      duration_min: String(row.duration_min ?? 60),
+      color: row.color,
+      sort_order: String(row.sort_order),
     })
     setShow(true)
   }
 
   const handleSubmit = async () => {
-    if (!form.name.trim())          return toast.error('Нэр оруулна уу')
-    if (!parseFloat(form.price))    return toast.error('Үнэ оруулна уу')
+    if (!form.name.trim()) return toast.error('Нэр оруулна уу')
+    if (withPrice && !parseFloat(form.price)) return toast.error('Үнэ оруулна уу')
     const data = {
       name: form.name.trim(),
-      price: parseFloat(form.price),
-      duration_min: parseInt(form.duration_min) || 60,
       color: form.color,
       sort_order: parseInt(form.sort_order) || 0,
+      ...(withPrice ? { price: parseFloat(form.price) } : {}),
+      ...(withDuration ? { duration_min: parseInt(form.duration_min) || 60 } : {}),
     }
     try {
-      if (editing) { await roomTypesApi.update(editing.id, data); toast.success('Төрөл шинэчлэгдлээ') }
-      else         { await roomTypesApi.create(data);             toast.success('Төрөл нэмэгдлээ')    }
+      if (editing) { await api.update(editing.id, data); toast.success('Шинэчлэгдлээ') }
+      else         { await api.create(data);             toast.success('Нэмэгдлээ')    }
       setShow(false); fetch()
     } catch { /* interceptor toast */ }
   }
 
   const handleToggle = async (row) => {
-    try { await roomTypesApi.update(row.id, { is_active: !row.is_active }); fetch() } catch {}
+    try { await api.update(row.id, { is_active: !row.is_active }); fetch() } catch {}
   }
 
   const handleDelete = async (row) => {
-    if (!confirm(`"${row.name}" төрлийг устгах уу?`)) return
-    try { await roomTypesApi.remove(row.id); toast.success('Устгагдлаа'); fetch() } catch {}
+    if (!confirm(`"${row.name}" устгах уу?`)) return
+    try { await api.remove(row.id); toast.success('Устгагдлаа'); fetch() } catch {}
   }
 
   return (
     <div className="p-4 space-y-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="font-bold text-gray-800">Өрөөний төрөл</h2>
-          <p className="text-xs text-gray-500">{rows.length} төрөл · үнэ ба стандарт хугацаа</p>
+          <h2 className="font-bold text-gray-800">{title}</h2>
+          <p className="text-xs text-gray-500">{rows.length} мөр · {subtitle}</p>
         </div>
         <button onClick={openCreate}
           className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2
                      rounded-xl text-sm font-medium">
-          <Plus className="w-4 h-4" /> Төрөл нэмэх
+          <Plus className="w-4 h-4" /> {addLabel}
         </button>
       </div>
 
       <div className="bg-white rounded-2xl border shadow-sm overflow-hidden">
         {rows.length === 0 && (
-          <div className="p-8 text-center text-sm text-gray-400">Төрөл алга. Эхний төрлөө нэмнэ үү.</div>
+          <div className="p-8 text-center text-sm text-gray-400">{emptyText}</div>
         )}
 
         {/* Mobile */}
@@ -1366,7 +1481,9 @@ function RoomTypesTab() {
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-gray-800 text-sm truncate">{row.name}</p>
                 <p className="text-xs text-gray-500">
-                  {row.price.toLocaleString()}₮ · {row.duration_min}мин
+                  {withPrice && `${row.price.toLocaleString()}₮`}
+                  {withPrice && withDuration && ' · '}
+                  {withDuration && `${row.duration_min}мин`}
                   {!row.is_active && <span className="text-gray-400"> · Идэвхгүй</span>}
                 </p>
               </div>
@@ -1382,8 +1499,8 @@ function RoomTypesTab() {
               <thead className="bg-gray-50 text-xs text-gray-500">
                 <tr>
                   <th className="text-left px-4 py-2.5 font-semibold">Нэр</th>
-                  <th className="text-left px-4 py-2.5 font-semibold">Үнэ</th>
-                  <th className="text-left px-4 py-2.5 font-semibold">Хугацаа</th>
+                  {withPrice && <th className="text-left px-4 py-2.5 font-semibold">Үнэ</th>}
+                  {withDuration && <th className="text-left px-4 py-2.5 font-semibold">Хугацаа</th>}
                   <th className="text-left px-4 py-2.5 font-semibold">Өнгө</th>
                   <th className="text-left px-4 py-2.5 font-semibold">Статус</th>
                   <th className="px-4 py-2.5" />
@@ -1393,8 +1510,10 @@ function RoomTypesTab() {
                 {rows.map(row => (
                   <tr key={row.id} className="hover:bg-gray-50">
                     <td className="px-4 py-2.5 font-medium text-gray-800">{row.name}</td>
-                    <td className="px-4 py-2.5">{row.price.toLocaleString()}₮</td>
-                    <td className="px-4 py-2.5 text-gray-500">{row.duration_min} мин</td>
+                    {withPrice && <td className="px-4 py-2.5">{row.price.toLocaleString()}₮</td>}
+                    {withDuration && (
+                      <td className="px-4 py-2.5 text-gray-500">{row.duration_min} мин</td>
+                    )}
                     <td className="px-4 py-2.5">
                       <span className="inline-block w-5 h-5 rounded-full border" style={{ background: row.color }} />
                     </td>
@@ -1416,24 +1535,29 @@ function RoomTypesTab() {
 
       {showModal && (
         <Modal
-          title={editing ? 'Төрөл засах' : 'Шинэ төрөл нэмэх'}
+          title={editing ? 'Засах' : addLabel}
           onClose={() => setShow(false)}
           onSubmit={handleSubmit}
           submitLabel={editing ? 'Хадгалах' : 'Нэмэх'}
         >
           <Field label="Нэр *">
-            <input className="input" placeholder="2 хүний" value={form.name}
+            <input className="input" placeholder={namePlaceholder} value={form.name}
               onChange={e => setForm({ ...form, name: e.target.value })} />
           </Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Үнэ (₮) *">
-              <input className="input" type="number" placeholder="8000" value={form.price}
-                onChange={e => setForm({ ...form, price: e.target.value })} />
-            </Field>
-            <Field label="Хугацаа (мин)">
-              <input className="input" type="number" value={form.duration_min}
-                onChange={e => setForm({ ...form, duration_min: e.target.value })} />
-            </Field>
+            {withPrice && (
+              <Field label="Үнэ (₮) *">
+                <input className="input" type="number" placeholder={pricePlaceholder} value={form.price}
+                  onChange={e => setForm({ ...form, price: e.target.value })} />
+                <p className="text-[11px] text-gray-400 mt-1">НӨАТ багтсан үнэ</p>
+              </Field>
+            )}
+            {withDuration && (
+              <Field label="Хугацаа (мин)">
+                <input className="input" type="number" value={form.duration_min}
+                  onChange={e => setForm({ ...form, duration_min: e.target.value })} />
+              </Field>
+            )}
           </div>
           <Field label="Өнгө">
             <div className="flex gap-2 flex-wrap">
@@ -1452,6 +1576,51 @@ function RoomTypesTab() {
         </Modal>
       )}
     </div>
+  )
+}
+
+/** Шүршүүрийн тариф — ҮНЭ ЭНД. Хүн тус бүрээр төлбөр тооцно. */
+function ShowerTariffsTab() {
+  return (
+    <ColorListTab
+      api={showerTariffsApi}
+      withPrice
+      title="Шүршүүрийн тариф"
+      subtitle="хүний төрөл бүрийн НӨАТ багтсан үнэ"
+      addLabel="Тариф нэмэх"
+      namePlaceholder="Том хүн"
+      pricePlaceholder="5000"
+      emptyText="Тариф алга. Эхний тарифаа нэмнэ үү."
+    />
+  )
+}
+
+/** Барааны ангилал — үйлчилгээнийхээс тусдаа, зөвхөн бараа бүлэглэнэ. */
+function ProductCategoriesTab() {
+  return (
+    <ColorListTab
+      api={productCategoriesApi}
+      title="Барааны ангилал"
+      subtitle="бараа материалыг бүлэглэх"
+      addLabel="Ангилал нэмэх"
+      namePlaceholder="Угаалгын нунтаг"
+      emptyText="Ангилал алга. Эхний ангилалаа нэмнэ үү."
+    />
+  )
+}
+
+/** Өрөөний төрөл — тарифгүй, зөвхөн багтаамжийн ангилал. */
+function RoomTypesTab() {
+  return (
+    <ColorListTab
+      api={roomTypesApi}
+      withDuration
+      title="Өрөөний төрөл"
+      subtitle="багтаамж · ашиглах хугацаа · зураглалын өнгө"
+      addLabel="Төрөл нэмэх"
+      namePlaceholder="2 хүний"
+      emptyText="Төрөл алга. Эхний төрлөө нэмнэ үү."
+    />
   )
 }
 
@@ -1789,7 +1958,7 @@ function RoomsTab() {
               onChange={e => setForm({ ...form, room_type_id: e.target.value })}>
               {types.map(t => (
                 <option key={t.id} value={t.id}>
-                  {t.name} — {t.price.toLocaleString()}₮ / {t.duration_min}мин
+                  {t.name} — {t.duration_min}мин
                 </option>
               ))}
             </select>

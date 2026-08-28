@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, Integer, String, Float, Boolean,
-    DateTime, ForeignKey, Text, Enum, Table, Index, select, text as sa_text
+    DateTime, ForeignKey, Text, Enum, Table, select
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -114,6 +114,10 @@ class Order(Base):
     discount_type   = Column(String(20), nullable=True)
     discount_value  = Column(Float, default=0.0)
     discount_amount = Column(Float, default=0.0)
+    # Дүнд БАГТСАН НӨАТ (задалсан утга — total-д НЭМЭГДЭХГҮЙ).
+    # Үйлчилгээ/шүршүүр үргэлж, бараа нь product_vat сонгосон үед.
+    vat_amount      = Column(Float, default=0.0)
+    product_vat     = Column(Boolean, default=False)
     total           = Column(Float, default=0.0)
 
     payment_method  = Column(String(20), default=PaymentMethod.CASH)
@@ -142,6 +146,7 @@ class Order(Base):
 
     customer        = relationship("Customer", back_populates="orders")
     items           = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
+    sessions        = relationship("RoomSession", back_populates="order")
 
 
 # ── OrderItem (Захиалгын дэлгэрэнгүй) ─────────────────
@@ -183,6 +188,19 @@ def order_kind_condition(kind: str):
 
 
 # ── Inventory (Бараа материал) ─────────────────────────
+# ── ProductCategory (Барааны ангилал) ──────────────────
+#  Үйлчилгээний ангилалаас (Category) ТУСДАА: тэр нь угаалгын машины
+#  төрөлтэй холбоотой, энэ нь зөвхөн бараа материалыг бүлэглэнэ.
+class ProductCategory(Base):
+    __tablename__ = "product_categories"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    name       = Column(String(100), nullable=False)      # "Угаалгын нунтаг"
+    color      = Column(String(20), default="#38bdf8")
+    sort_order = Column(Integer, default=0)
+    is_active  = Column(Boolean, default=True)
+
+
 class InventoryItem(Base):
     __tablename__ = "inventory"
 
@@ -195,7 +213,10 @@ class InventoryItem(Base):
     sale_price   = Column(Float, default=0.0)          # POS дээр зарах үнэ
     is_for_sale  = Column(Boolean, default=False)      # POS-оос зарж болох эсэх
     supplier     = Column(String(100), nullable=True)
+    category_id  = Column(Integer, ForeignKey("product_categories.id"), nullable=True)
     updated_at   = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+
+    category     = relationship("ProductCategory", lazy="joined")
 
 
 # ── User (Хэрэглэгч) ───────────────────────────────────
@@ -219,6 +240,9 @@ class CashierShift(Base):
 
     id              = Column(Integer, primary_key=True, index=True)
     user_id         = Column(Integer, ForeignKey("users.id"), nullable=False)
+    # Кассын төрөл — ээлж эхлэх үеийн User.cashier_scope-ын хуулбар.
+    # laundry | shower | master. Огтлолцох төрөл дээр зэрэг ээлж нээгдэхгүй.
+    scope           = Column(String(20), default="master", nullable=False)
     started_at      = Column(DateTime(timezone=True), default=_now_local)
     ended_at        = Column(DateTime(timezone=True), nullable=True)
     status          = Column(String(20), default="active")  # active | ended
@@ -281,13 +305,33 @@ ROOM_OCCUPYING_STATUSES = ("reserved", "in_use", "awaiting_cleaning", "cleaning"
 SESSION_ACTIVE_STATUSES = ("waiting",) + ROOM_OCCUPYING_STATUSES
 
 
+# ── ShowerTariff (Хүний төрлийн тариф: Том хүн / Хүүхэд...) ──
+# Шүршүүрийн үнэ ХҮНИЙ ТӨРЛӨӨС тодорхойлогдоно (өрөөнөөс биш).
+class ShowerTariff(Base):
+    __tablename__ = "shower_tariffs"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    name         = Column(String(100), nullable=False)           # "Том хүн"
+    price        = Column(Float, nullable=False)                 # НӨАТ БАГТСАН үнэ
+    # Хугацаа тарифт биш ӨРӨӨНИЙ ТӨРӨЛД байна: өөр өөр тарифтай хүмүүс
+    # (том хүн + цэцэрлэгийн хүүхэд) нэг өрөөнд хамт орох тул хугацаа нь
+    # тэдний эзэлсэн ӨРӨӨӨӨС шалтгаална. Багана нь хуучин DB-тэй нийцэхийн
+    # тулд үлдсэн — API/UI-д ашиглагдахгүй.
+    duration_min = Column(Integer, default=0, nullable=False)
+    color        = Column(String(20), default="#38bdf8")
+    sort_order   = Column(Integer, default=0)
+    is_active    = Column(Boolean, default=True)
+
+
 # ── RoomType (Өрөөний төрөл: 1 хүний / 2 хүний / Саун) ────
+# Тарифгүй — зөвхөн багтаамжийн ангилал ба зураглалын өнгө.
 class RoomType(Base):
     __tablename__ = "room_types"
 
     id           = Column(Integer, primary_key=True, index=True)
     name         = Column(String(100), nullable=False)           # "1 хүний"
-    price        = Column(Float, nullable=False)                 # тогтмол үнэ
+    # Хуучин багана — үнэ одоо ShowerTariff дээр. DB rebuild-ээс зайлсхийж үлдээв.
+    price        = Column(Float, nullable=False, default=0.0)
     duration_min = Column(Integer, default=60, nullable=False)   # стандарт хугацаа
     color        = Column(String(20), default="#38bdf8")         # зураглал дээрх өнгө
     sort_order   = Column(Integer, default=0)
@@ -316,23 +360,25 @@ class Room(Base):
                                 foreign_keys="RoomSession.room_id")
 
 
-# ── RoomSession (Нэг худалдан авалт = нэг session) ─────────
+# ── RoomSession (Нэг хүн = нэг session = нэг тасалбар) ─────
 class RoomSession(Base):
     __tablename__ = "room_sessions"
 
     id            = Column(Integer, primary_key=True, index=True)
     room_id       = Column(Integer, ForeignKey("rooms.id"), nullable=True)         # waiting үед NULL
-    room_type_id  = Column(Integer, ForeignKey("room_types.id"), nullable=False)   # юуны төлбөр төлсөн
+    room_type_id  = Column(Integer, ForeignKey("room_types.id"), nullable=True)    # өрөө оноогдох үед бөглөгдөнө
+    tariff_id     = Column(Integer, ForeignKey("shower_tariffs.id"), nullable=True)  # хүний төрөл
     order_id      = Column(Integer, ForeignKey("orders.id"), nullable=False)
     order_item_id = Column(Integer, ForeignKey("order_items.id"), nullable=True)
-    queue_no      = Column(Integer, nullable=False, default=0)   # өдрийн дарааллын дугаар (Ш-07)
+    queue_no      = Column(Integer, nullable=False, default=0)   # өдрийн ГЛОБАЛ дарааллын дугаар
 
     # snapshot
     room_number   = Column(String(20), nullable=True)     # өрөө оноогдох үед бөглөгдөнө
-    type_name     = Column(String(100), nullable=True)
+    type_name     = Column(String(100), nullable=True)    # тарифын нэр ("Том хүн")
     customer_name = Column(String(100), nullable=True)
-    price         = Column(Float, nullable=False)
-    duration_min  = Column(Integer, nullable=False)
+    price         = Column(Float, nullable=False)         # тарифын НӨАТ багтсан үнэ
+    # Худалдан авах үед 0 — өрөө оноогдох үед өрөөний төрлөөс бөглөгдөнө
+    duration_min  = Column(Integer, nullable=False, default=0)
 
     status        = Column(String(20), default="waiting", index=True)
     # Дуудахад ирээгүй — дараагийн хүн рүү алгасна. Оочир нь хадгалагдаж,
@@ -349,18 +395,12 @@ class RoomSession(Base):
 
     room       = relationship("Room", back_populates="sessions", foreign_keys=[room_id])
     room_type  = relationship("RoomType")
-    order      = relationship("Order")
+    tariff     = relationship("ShowerTariff")
+    order      = relationship("Order", back_populates="sessions")
 
-    # Нэг өрөөнд зэрэг ганцхан идэвхтэй session — давхар захиалгын хамгаалалт
-    __table_args__ = (
-        Index(
-            "ux_room_sessions_active_room", "room_id", unique=True,
-            sqlite_where=sa_text(
-                "status IN ('reserved','in_use','awaiting_cleaning','cleaning') "
-                "AND room_id IS NOT NULL"
-            ),
-        ),
-    )
+    # АНХААР: нэг өрөөнд ОЛОН идэвхтэй session зөвшөөрөгдөнө (гэр бүл хамт орох).
+    # Тиймээс хуучин ux_room_sessions_active_room unique index-ийг устгасан;
+    # давхар оноолтын хамгаалалт assign endpoint-ийн сул-эсэх шалгалтад бий.
 
 
 # ═══════════════════════════════════════════════════════════

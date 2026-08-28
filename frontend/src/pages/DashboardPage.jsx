@@ -2,7 +2,10 @@ import { useState, useEffect } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LabelList
 } from 'recharts'
-import { Banknote, ArrowLeftRight, Smartphone, Search, AlertTriangle } from 'lucide-react'
+import {
+  Banknote, ArrowLeftRight, Smartphone, Search, AlertTriangle,
+  Clock, ChevronDown, ChevronRight,
+} from 'lucide-react'
 import { reportsApi, machinesApi, shiftsApi } from '../api/client'
 import dayjs from 'dayjs'
 
@@ -327,6 +330,9 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {/* Ээлжийн тайлан */}
+        <ShiftReport />
+
         {/* Machine Report */}
         <MachineReport />
 
@@ -354,6 +360,202 @@ export default function DashboardPage() {
     </div>
   )
 }
+
+/* ── Ээлжийн тайлан ──────────────────────────────────────────
+   Ээлж бүрийн эхэлсэн/дууссан цаг, нийт дүн. Мөр дээр дарахад
+   төлбөрийн хэлбэр ба үйлчилгээний задаргаа нээгдэнэ.          */
+const SHIFT_SCOPES = [
+  { value: '',        label: 'Бүх төрөл' },
+  { value: 'laundry', label: 'Угаалга'   },
+  { value: 'shower',  label: 'Шүршүүр'   },
+  { value: 'master',  label: 'Бүх касс'  },
+]
+
+const SCOPE_LABEL = { laundry: 'Угаалга', shower: 'Шүршүүр', master: 'Бүх касс' }
+const money = (n) => `${Math.round(n || 0).toLocaleString()}₮`
+
+function ShiftReport() {
+  const [start, setStart]     = useState(dayjs().startOf('month').format('YYYY-MM-DD'))
+  const [end,   setEnd]       = useState(dayjs().format('YYYY-MM-DD'))
+  const [scope, setScope]     = useState('')
+  const [rows,  setRows]      = useState([])
+  const [loading, setLoading] = useState(false)
+  const [open,  setOpen]      = useState(null)   // задаргаа нээсэн ээлжийн id
+
+  const load = (s = start, e = end, sc = scope) => {
+    setLoading(true)
+    shiftsApi.history({
+      date_from: s, date_to: e,
+      include_active: true,          // одоо ажиллаж буй ээлж ч харагдана
+      ...(sc ? { scope: sc } : {}),
+    })
+      .then(r => setRows(r.data || []))
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => { load() }, [])
+
+  const quickSet = (days) => {
+    const e = dayjs().format('YYYY-MM-DD')
+    const s = dayjs().subtract(days - 1, 'day').format('YYYY-MM-DD')
+    setStart(s); setEnd(e); load(s, e)
+  }
+
+  const applyScope = (sc) => { setScope(sc); load(start, end, sc) }
+
+  const grandTotal = rows.reduce((a, r) => a + (r.total_revenue || 0), 0)
+  const grandCash  = rows.reduce((a, r) => a + (r.cash_total || 0), 0)
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 p-5">
+      <h2 className="font-bold text-gray-700 mb-3 flex items-center gap-2">
+        <Clock className="w-4 h-4 text-orange-500" /> Кассын ээлжүүд
+      </h2>
+
+      {/* Шүүлтүүр */}
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        <input type="date" value={start} onChange={e => setStart(e.target.value)}
+          className="border rounded-lg px-2 py-1.5 text-sm" />
+        <span className="text-gray-400">—</span>
+        <input type="date" value={end} onChange={e => setEnd(e.target.value)}
+          className="border rounded-lg px-2 py-1.5 text-sm" />
+        <button onClick={() => load()}
+          className="flex items-center gap-1 bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-blue-700">
+          <Search className="w-3.5 h-3.5" /> Хайх
+        </button>
+        <div className="flex gap-1 ml-1">
+          {[{ label: 'Өнөөдөр', d: 1 }, { label: '7 хоног', d: 7 }, { label: '30 хоног', d: 30 }].map(q => (
+            <button key={q.d} onClick={() => quickSet(q.d)}
+              className="bg-gray-100 hover:bg-gray-200 text-gray-600 px-2.5 py-1 rounded-lg text-xs font-medium">
+              {q.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-1 ml-auto">
+          {SHIFT_SCOPES.map(s => (
+            <button key={s.value} onClick={() => applyScope(s.value)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors
+                ${scope === s.value
+                  ? 'bg-orange-500 text-white'
+                  : 'bg-gray-100 hover:bg-gray-200 text-gray-600'}`}>
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Хураангуй */}
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className="bg-orange-50 rounded-xl p-3 text-center">
+          <p className="text-2xl font-bold text-orange-700">{rows.length}</p>
+          <p className="text-xs text-orange-600">Ээлж</p>
+        </div>
+        <div className="bg-blue-50 rounded-xl p-3 text-center">
+          <p className="text-xl sm:text-2xl font-bold text-blue-700">{money(grandTotal)}</p>
+          <p className="text-xs text-blue-600">Нийт орлого</p>
+        </div>
+        <div className="bg-green-50 rounded-xl p-3 text-center">
+          <p className="text-xl sm:text-2xl font-bold text-green-700">{money(grandCash)}</p>
+          <p className="text-xs text-green-600">Бэлэн мөнгө</p>
+        </div>
+      </div>
+
+      {loading ? (
+        <p className="text-center text-gray-400 py-4">Уншиж байна...</p>
+      ) : rows.length === 0 ? (
+        <p className="text-center text-gray-400 py-4">Энэ хугацаанд ээлж байхгүй</p>
+      ) : (
+        <div className="space-y-2">
+          {rows.map(r => (
+            <ShiftRow key={r.shift.id} r={r}
+                      open={open === r.shift.id}
+                      onToggle={() => setOpen(open === r.shift.id ? null : r.shift.id)} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ShiftRow({ r, open, onToggle }) {
+  const s      = r.shift
+  const active = s.status === 'active'
+  const mins   = s.started_at
+    ? Math.max(0, dayjs(s.ended_at || undefined).diff(dayjs(s.started_at), 'minute'))
+    : 0
+
+  return (
+    <div className="rounded-xl border border-gray-200 overflow-hidden">
+      <button onClick={onToggle}
+        className="w-full flex items-center gap-3 px-3 py-2.5 bg-gray-50 hover:bg-gray-100 text-left transition-colors">
+        {open ? <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
+              : <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />}
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-sm text-gray-800 truncate">
+              {s.user?.full_name || '—'}
+            </span>
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-gray-200 text-gray-600 shrink-0">
+              {SCOPE_LABEL[s.scope] || s.scope}
+            </span>
+            {active && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 shrink-0">
+                ажиллаж байна
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-gray-400 mt-0.5 tabular-nums">
+            {dayjs(s.started_at).format('MM/DD HH:mm')}
+            {' → '}
+            {s.ended_at ? dayjs(s.ended_at).format('MM/DD HH:mm') : '…'}
+            <span className="ml-2">({Math.floor(mins / 60)}ц {mins % 60}м)</span>
+          </p>
+        </div>
+
+        <div className="text-right shrink-0">
+          <p className="font-black text-blue-600">{money(r.total_revenue)}</p>
+          <p className="text-xs text-gray-400">{r.total_orders} захиалга</p>
+        </div>
+      </button>
+
+      {open && (
+        <div className="px-4 py-3 bg-white grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm">
+          <p className="sm:col-span-2 text-xs font-bold text-gray-400 uppercase tracking-wide">
+            Төлбөрийн хэлбэр
+          </p>
+          <Detail label="Бэлэн мөнгө" value={money(r.cash_total)} />
+          <Detail label="Шилжүүлэг"   value={money(r.transfer_total)} />
+          <Detail label="Карт"        value={money(r.card_total)} />
+          {r.late_total   > 0 && <Detail label="Нөхөж авсан"     value={`+${money(r.late_total)}`} color="text-orange-600" />}
+          {r.unpaid_total > 0 && <Detail label="Төлбөр төлөөгүй" value={money(r.unpaid_total)}     color="text-red-600" />}
+
+          <p className="sm:col-span-2 text-xs font-bold text-gray-400 uppercase tracking-wide mt-2">
+            Үйлчилгээний задаргаа
+          </p>
+          <Detail label="Угаалгын үйлчилгээ" value={money(r.laundry_total)} />
+          <Detail label="Шүршүүр"            value={money(r.shower_total)} />
+          <Detail label="Бараа материал"     value={money(r.product_total)} />
+          <Detail label="Үйлчлүүлэгч"        value={r.total_customers} />
+          {r.points_total   > 0 && <Detail label="Оноогоор" value={`-${money(r.points_total)}`}   color="text-emerald-600" />}
+          {r.discount_total > 0 && <Detail label="Хямдрал"  value={`-${money(r.discount_total)}`} color="text-emerald-600" />}
+          {r.vat_total      > 0 && <Detail label="үүнд НӨАТ (10%)" value={money(r.vat_total)} />}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Detail({ label, value, color = '' }) {
+  return (
+    <div className="flex justify-between gap-3 py-0.5">
+      <span className={color || 'text-gray-500'}>{label}</span>
+      <span className={`font-semibold ${color || 'text-gray-800'}`}>{value}</span>
+    </div>
+  )
+}
+
 
 function MachineReport() {
   const [start, setStart] = useState(dayjs().format('YYYY-MM-DD'))

@@ -146,8 +146,7 @@ class InventoryBriefOut(BaseModel):
 class OrderItemCreate(BaseModel):
     service_id:   Optional[int] = None   # үйлчилгээний захиалга
     product_id:   Optional[int] = None   # бараа зарах
-    room_id:      Optional[int] = None   # шүршүүр — тодорхой өрөө сонгосон
-    room_type_id: Optional[int] = None   # шүршүүр — дарааллын тасалбар (өрөөгүй)
+    tariff_id:    Optional[int] = None   # шүршүүр — хүний төрлийн тасалбар
     quantity:     int = 1
     notes:        Optional[str] = None
 
@@ -179,6 +178,7 @@ class OrderCreate(BaseModel):
     payment_method:  PaymentMethod        = PaymentMethod.CASH
     payment_details: Optional[str]        = None   # JSON for mixed: '{"cash":10000,"transfer":20000}'
     points_used:     int                  = 0
+    product_vat:     bool                 = False   # бараа материалд НӨАТ нэмэх эсэх
     notes:           Optional[str]        = None
     cashier_name:    str                  = "Кассчин"
 
@@ -194,6 +194,22 @@ class OrderFlagRequest(BaseModel):
     """Анхааруулгын жагсаалтад нэмэх (төлбөр төлөлгүй явсан)"""
     reason: Optional[str] = None
 
+class OrderSessionBrief(BaseModel):
+    """Захиалгаас үүссэн шүршүүрийн тасалбар — хэвлэхэд ашиглана."""
+    id:            int
+    queue_no:      int
+    order_item_id: Optional[int] = None   # аль мөрөөс үүссэн — түүхэнд харуулна
+    type_name:     Optional[str] = None   # тарифын нэр ("Том хүн")
+    price:        float                   # НӨАТ БАГТСАН үнэ
+    # Хугацаа өрөө оноогдох үед л тодорно (өрөөний төрлөөс) — тасалбар
+    # хэвлэх үед 0 байна.
+    duration_min: int = 0
+    status:       str
+
+    class Config:
+        from_attributes = True
+
+
 class OrderOut(BaseModel):
     id:               int
     order_number:     str
@@ -205,6 +221,8 @@ class OrderOut(BaseModel):
     discount_type:    Optional[str]
     discount_value:   float
     discount_amount:  float
+    vat_amount:       float = 0.0   # дүнд БАГТСАН НӨАТ (нэмэгдэхгүй)
+    product_vat:      bool = False
     total:            float
     payment_method:   str
     payment_details:  Optional[str]
@@ -222,6 +240,7 @@ class OrderOut(BaseModel):
     flagged_reason:   Optional[str] = None
     flagged_by:       Optional[str] = None
     items:            List[OrderItemOut]
+    sessions:         List[OrderSessionBrief] = []   # шүршүүрийн тасалбарууд
 
     @field_serializer('created_at')
     def _ser_created_at(self, v): return _utc_iso(v)
@@ -240,6 +259,29 @@ class OrderOut(BaseModel):
 
 
 # ── Inventory ──────────────────────────────────────────
+# ── Барааны ангилал (үйлчилгээнийхээс ТУСДАА) ──────────
+class ProductCategoryCreate(BaseModel):
+    name:       str
+    color:      str = "#38bdf8"
+    sort_order: int = 0
+
+class ProductCategoryUpdate(BaseModel):
+    name:       Optional[str]  = None
+    color:      Optional[str]  = None
+    sort_order: Optional[int]  = None
+    is_active:  Optional[bool] = None
+
+class ProductCategoryOut(BaseModel):
+    id:         int
+    name:       str
+    color:      str
+    sort_order: int
+    is_active:  bool
+
+    class Config:
+        from_attributes = True
+
+
 class InventoryCreate(BaseModel):
     name:         str
     unit:         str = "кг"
@@ -249,13 +291,18 @@ class InventoryCreate(BaseModel):
     sale_price:   float = 0.0
     is_for_sale:  bool = False
     supplier:     Optional[str] = None
+    category_id:  Optional[int] = None
 
 class InventoryUpdate(BaseModel):
+    name:         Optional[str]   = None
+    unit:         Optional[str]   = None
     quantity:     Optional[float] = None
     min_quantity: Optional[float] = None
     cost_price:   Optional[float] = None
     sale_price:   Optional[float] = None
     is_for_sale:  Optional[bool]  = None
+    supplier:     Optional[str]   = None
+    category_id:  Optional[int]   = None
 
 class InventoryOut(BaseModel):
     id:           int
@@ -267,6 +314,8 @@ class InventoryOut(BaseModel):
     sale_price:   float
     is_for_sale:  bool
     supplier:     Optional[str]
+    category_id:  Optional[int] = None
+    category:     Optional[ProductCategoryOut] = None
     updated_at:   Optional[datetime]
     is_low:       bool = False   # computed
 
@@ -382,6 +431,7 @@ class ShiftOut(BaseModel):
     id:          int
     user_id:     int
     user:        Optional[UserOut] = None
+    scope:       str = "master"          # laundry | shower | master
     started_at:  datetime
     ended_at:    Optional[datetime] = None
     status:      str
@@ -406,6 +456,22 @@ class ShiftSummary(BaseModel):
     card_total:     float
     unpaid_total:   float = 0.0   # төлбөр төлөөгүй үлдэгдэл
     late_total:     float = 0.0   # нөхөж авсан төлбөр (өмнөх өдрийн захиалга)
+    # ── Задаргаа (кассд мөнгө болж ОРООГҮЙ хөнгөлөлт + төрлийн ангилал) ──
+    points_total:   float = 0.0   # оноогоор хасагдсан дүн
+    discount_total: float = 0.0   # хямдралаар хасагдсан дүн
+    vat_total:      float = 0.0   # дүнд багтсан НӨАТ
+    shower_total:   float = 0.0   # шүршүүрийн мөрүүдийн дүн
+    laundry_total:  float = 0.0   # угаалгын үйлчилгээний дүн
+    product_total:  float = 0.0   # бараа материалын дүн
+
+
+class ShiftState(BaseModel):
+    """POS нээгдэх эсэхийг шийддэг төлөв (GET /shifts/my)."""
+    requires_shift: bool                        # кассчин мөн үү
+    scope:          str                         # laundry | shower | master
+    scope_label:    str                         # "Угаалга" гэх мэт
+    shift:          Optional[ShiftOut] = None   # өөрийн идэвхтэй ээлж
+    blocked_by:     Optional[ShiftOut] = None   # саад болж буй өөр кассын ээлж
 
 
 # ── Machine (Машин) ───────────────────────────────────────
@@ -474,10 +540,38 @@ class DailyMachineSummary(BaseModel):
     total_minutes:  int
 
 
-# ── Шүршүүр: Өрөөний төрөл ────────────────────────────────
-class RoomTypeCreate(BaseModel):
+# ── Шүршүүр: Хүний төрлийн тариф ──────────────────────────
+# Үнэ ЭНД байна — өрөө биш, хүн тус бүрээр төлбөр тооцно.
+class ShowerTariffCreate(BaseModel):
+    name:         str
+    price:        float          # НӨАТ БАГТСАН үнэ
+    color:        str = "#38bdf8"
+    sort_order:   int = 0
+
+
+class ShowerTariffUpdate(BaseModel):
+    name:         Optional[str]   = None
+    price:        Optional[float] = None
+    color:        Optional[str]   = None
+    sort_order:   Optional[int]   = None
+    is_active:    Optional[bool]  = None
+
+
+class ShowerTariffOut(BaseModel):
+    id:           int
     name:         str
     price:        float
+    color:        str
+    sort_order:   int
+    is_active:    bool
+
+    class Config:
+        from_attributes = True
+
+
+# ── Шүршүүр: Өрөөний төрөл (тарифгүй — зөвхөн багтаамж) ───
+class RoomTypeCreate(BaseModel):
+    name:         str
     duration_min: int = 60
     color:        str = "#38bdf8"
     sort_order:   int = 0
@@ -485,7 +579,6 @@ class RoomTypeCreate(BaseModel):
 
 class RoomTypeUpdate(BaseModel):
     name:         Optional[str]   = None
-    price:        Optional[float] = None
     duration_min: Optional[int]   = None
     color:        Optional[str]   = None
     sort_order:   Optional[int]   = None
@@ -495,7 +588,6 @@ class RoomTypeUpdate(BaseModel):
 class RoomTypeOut(BaseModel):
     id:           int
     name:         str
-    price:        float
     duration_min: int
     color:        str
     sort_order:   int
@@ -530,13 +622,17 @@ class RoomLayoutUpdate(BaseModel):
 
 
 class RoomAssignRequest(BaseModel):
-    room_id: int
+    """Нэг буюу хэд хэдэн тасалбарыг НЭГ өрөөнд оруулах.
+    (Гэр бүл хамт орох боломжтой болсон тул жагсаалт авна.)"""
+    session_ids: List[int]
+    room_id:     int
 
 
 class RoomSessionOut(BaseModel):
     id:                  int
     room_id:             Optional[int]
-    room_type_id:        int
+    room_type_id:        Optional[int] = None   # өрөө оноогдох үед бөглөгдөнө
+    tariff_id:           Optional[int] = None
     order_id:            int
     order_item_id:       Optional[int]
     queue_no:            int
@@ -584,7 +680,10 @@ class RoomOut(BaseModel):
     map_w:          Optional[int] = None
     map_h:          Optional[int] = None
     room_type:      Optional[RoomTypeOut]    = None
-    active_session: Optional[RoomSessionOut] = None   # тооцоолсон
+    # Өрөөнд зэрэг олон хүн байж болно. active_session нь хамгийн урт
+    # хугацаатай оршин суугч — таймер/статус харуулахад төлөөлөгч болно.
+    active_session:  Optional[RoomSessionOut]  = None   # тооцоолсон
+    active_sessions: List[RoomSessionOut]      = []     # тооцоолсон
 
     class Config:
         from_attributes = True

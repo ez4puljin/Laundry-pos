@@ -1,7 +1,8 @@
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, and_, func, case
-from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 from datetime import datetime, date, timezone, timedelta
 
@@ -13,9 +14,10 @@ def _now_local():
 
 from database import get_db
 from models import (
+    CashierShift,
     Order, OrderItem, Service, Customer, Coupon, InventoryItem,
-    Room, RoomType, RoomSession, order_kind_condition,
-    ROOM_OCCUPYING_STATUSES, SESSION_ACTIVE_STATUSES,
+    RoomSession, ShowerTariff, order_kind_condition,
+    SESSION_ACTIVE_STATUSES,
 )
 from schemas import (
     OrderCreate, OrderItemCreate, OrderOut, OrderStatusUpdate, OrderPayRequest,
@@ -49,6 +51,56 @@ def _calc_discount(subtotal: float, dtype: Optional[str], dvalue: float) -> floa
     return min(dvalue, subtotal)
 
 
+# ── НӨАТ ────────────────────────────────────────────────
+#  ХОЛИМОГ загвар:
+#
+#  * Үйлчилгээ ба шүршүүр — үнэ нь НӨАТ БАГТСАН. 5000₮ тарифтай бол
+#    үйлчлүүлэгч 5000₮ л төлнө; баримт дээр 455₮ нь НӨАТ гэж задарна.
+#
+#  * Бараа материал — үнэ нь НӨАТ-ГҮЙ (цэвэр) дүн. Кассчин «НӨАТ-тэй
+#    авах» гэж сонговол үнэ дээр +10% НЭМЭГДЭНЭ: 500₮ → 550₮ болж,
+#    нийт төлөх дүн ч мөн өснө. Сонгоогүй бол 500₮ хэвээр, НӨАТ гарахгүй.
+#
+#  Нэмэгдсэний дараа барааны үнэ ч НӨАТ багтсан болох тул НӨАТ-ийн
+#  задаргаа бүх мөрөнд нэг ижил томьёогоор бодогдоно (дүн/11).
+VAT_RATE = float(os.getenv("VAT_RATE", "0.10"))
+
+
+def _apply_product_vat(item_rows, product_vat: bool) -> None:
+    """«НӨАТ-тэй авах» сонгосон үед барааны мөрийн үнийг +10% болгоно.
+
+    Мөрийг ГАЗАР ДЭЭР нь өөрчилдөг тул баримт дээр нэгж үнэ өссөнөөр
+    харагдана (500₮ → 550₮). Үйлчилгээ/шүршүүрт хамаагүй.
+    """
+    if not product_vat:
+        return
+    for r in item_rows:
+        if r.item_type == "product":
+            r.unit_price  = round(r.unit_price * (1 + VAT_RATE))
+            r.total_price = r.unit_price * r.quantity
+
+# НӨАТ үргэлж ногдох мөрийн төрлүүд (үйлчилгээ ба шүршүүр)
+_VAT_ALWAYS_TYPES = ("service", "room")
+
+
+def _calc_vat(item_rows, product_vat: bool) -> float:
+    """НӨАТ-тэй мөрүүдийн дүнд багтсан НӨАТ-ийг задалж бодох.
+
+    ЧУХАЛ: барааны үнэ аль хэдийн _apply_product_vat-аар нэмэгдсэн байх
+    ёстой — тэгснээр бүх НӨАТ-тэй мөр «НӨАТ багтсан» болж, нэг ижил
+    томьёо (дүн/11) хэрэглэгдэнэ.
+
+    Үйлчилгээ болон шүршүүр үргэлж НӨАТ-тэй. Бараа материал зөвхөн
+    кассчин «НӨАТ-тэй авах» сонголтыг чеклэсэн үед.
+    """
+    base = sum(
+        r.total_price for r in item_rows
+        if r.item_type in _VAT_ALWAYS_TYPES
+        or (product_vat and r.item_type == "product")
+    )
+    return round(base * VAT_RATE / (1 + VAT_RATE), 0)
+
+
 # Кассчин хэдэн өдрийн түүх харах эрхтэй вэ (өнөөдөр + өчигдөр)
 CASHIER_HISTORY_DAYS = 1
 
@@ -71,6 +123,7 @@ def _clamp_history_range(date_from: Optional[str], date_to: Optional[str], user)
 def list_orders(
     status: Optional[str] = None,
     kind: Optional[str] = None,          # laundry | shower (хоосон = бүгд)
+    payment_method: Optional[str] = None,  # cash|transfer|card|mixed|points|unpaid
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     skip: int = 0,
@@ -83,12 +136,21 @@ def list_orders(
     q = db.query(Order).options(
         joinedload(Order.customer),
         joinedload(Order.items).joinedload(OrderItem.service),
-        joinedload(Order.items).joinedload(OrderItem.product)
+        joinedload(Order.items).joinedload(OrderItem.product),
+        joinedload(Order.sessions),      # түүх дээр оочирын № харуулна
     )
     if status:
         q = q.filter(Order.status == status)
     else:
         q = q.filter(Order.status != "deleted")
+    if payment_method:
+        # «unpaid» нь тусдаа арга биш, төлөгдөөгүй байдал — тиймээс
+        # is_paid-аар шүүнэ. Бусад нь бодит төлбөрийн хэлбэр.
+        if payment_method == "unpaid":
+            q = q.filter(Order.is_paid == False)
+        else:
+            q = q.filter(Order.is_paid == True,
+                         Order.payment_method == payment_method)
     kind_cond = order_kind_condition(kind)
     if kind_cond is not None:
         q = q.filter(kind_cond)
@@ -117,11 +179,13 @@ def get_queue(db: Session = Depends(get_db)):
     Шүршүүр цэсэн дээр тусдаа удирдагдана.
     """
     today_start = _now_local().replace(hour=0, minute=0, second=0, microsecond=0)
-    # Зөвхөн шүршүүрээс бүрдсэн захиалгууд (угаалгын үйлчилгээгүй) — эдгээрийг хасна
-    shower_only = (
+    # Угаалгын АЖИЛГҮЙ захиалгуудыг хасна: шүршүүрийн тасалбар болон бараа
+    # материал кассан дээр шууд гардаг тул дараалалд хүлээх зүйл байхгүй.
+    # (Зөвхөн 'service' мөр л угаалгын процесс шаарддаг.)
+    no_laundry_work = (
         db.query(OrderItem.order_id)
         .group_by(OrderItem.order_id)
-        .having(func.sum(case((OrderItem.item_type != "room", 1), else_=0)) == 0)
+        .having(func.sum(case((OrderItem.item_type == "service", 1), else_=0)) == 0)
     )
     return (
         db.query(Order)
@@ -132,7 +196,7 @@ def get_queue(db: Session = Depends(get_db)):
         )
         .filter(
             Order.status.notin_(["archived", "deleted"]),
-            Order.id.notin_(shower_only),
+            Order.id.notin_(no_laundry_work),
             or_(
                 Order.status != "delivered",
                 and_(Order.status == "delivered", Order.delivered_at >= today_start)
@@ -276,11 +340,27 @@ def get_order(order_id: int, db: Session = Depends(get_db)):
     o = db.query(Order).options(
         joinedload(Order.customer),
         joinedload(Order.items).joinedload(OrderItem.service),
-        joinedload(Order.items).joinedload(OrderItem.product)
+        joinedload(Order.items).joinedload(OrderItem.product),
+        joinedload(Order.sessions),      # тасалбар дахин хэвлэхэд
     ).filter(Order.id == order_id).first()
     if not o:
         raise HTTPException(status_code=404, detail="Захиалга олдсонгүй")
     return o
+
+
+def _require_open_shift(user, db: Session) -> None:
+    """Кассчны идэвхтэй ээлж байгаа эсэхийг шалгана (админд хамаарахгүй)."""
+    if getattr(user, "role", None) != "cashier":
+        return
+    shift = db.query(CashierShift).filter(
+        CashierShift.user_id == user.id,
+        CashierShift.status == "active",
+    ).first()
+    if not shift:
+        raise HTTPException(
+            status_code=409,
+            detail="Ээлж нээгдээгүй байна. «Ээлж эхлүүлэх» дарж эхэлнэ үү."
+        )
 
 
 @router.post("/", response_model=OrderOut)
@@ -289,12 +369,17 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db), current_us
     if not payload.items:
         raise HTTPException(status_code=400, detail="Хоосон захиалга болохгүй")
 
+    # Кассчин зөвхөн НЭЭЛТТЭЙ ээлж дээрээ ажиллана — тулгалт зөрөхөөс сэргийлнэ.
+    # (UI нь ээлжгүй үед POS-ыг хаадаг; энэ нь серверийн талын баталгаа.)
+    _require_open_shift(current_user, db)
+
     # Шүршүүрийг зөвхөн урьдчилж төлсөн үед л зарна
-    has_shower = any(i.room_id or i.room_type_id for i in payload.items)
-    # Зөвхөн шүршүүрээс бүрдсэн захиалгад угаалгын ажил байхгүй — шууд дууссанд тооцно.
-    # (Өрөөний амьдралын мөчлөгийг RoomSession тусад нь хөтөлнө.) Ингэснээр борлуулалт
-    # нь Түүх болон Тайланд шууд тусна.
-    is_shower_only = has_shower and all(i.room_id or i.room_type_id for i in payload.items)
+    has_shower = any(i.tariff_id for i in payload.items)
+    # Угаалгын АЖИЛГҮЙ захиалга (шүршүүрийн тасалбар ба/эсвэл бараа) — шууд
+    # дууссанд тооцно: хоёулаа кассан дээр шууд гардаг, дараалалд хүлээхгүй.
+    # (Өрөөний амьдралын мөчлөгийг RoomSession тусад нь хөтөлнө.) Ингэснээр
+    # борлуулалт нь Түүх болон Тайланд шууд тусна.
+    no_laundry_work = not any(i.service_id for i in payload.items)
     if has_shower and payload.payment_method.value == "unpaid":
         raise HTTPException(
             status_code=400,
@@ -304,60 +389,32 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db), current_us
     # 1. Subtotal тооцоолох
     subtotal = 0.0
     item_rows = []
-    seen_room_ids = set()
-    pending_sessions = []   # (item_rows индекс, "room"|"ticket", room, room_type, тоо)
+    pending_sessions = []   # (item_rows индекс, тариф, тоо ширхэг)
     for item in payload.items:
-        if not item.service_id and not item.product_id and not item.room_id and not item.room_type_id:
+        if not item.service_id and not item.product_id and not item.tariff_id:
             raise HTTPException(
                 status_code=400,
-                detail="service_id, product_id, room_id эсвэл room_type_id заавал байх ёстой"
+                detail="service_id, product_id эсвэл tariff_id заавал байх ёстой"
             )
 
-        if item.room_id:
-            # ── Шүршүүр: тодорхой өрөө ──────────────────────
-            room = db.query(Room).filter(Room.id == item.room_id, Room.is_active == True).first()
-            if not room:
-                raise HTTPException(status_code=404, detail="Өрөө олдсонгүй")
-            if room.id in seen_room_ids:
-                raise HTTPException(status_code=400, detail=f"Өрөө №{room.number} давхардсан байна")
-            occupied = db.query(RoomSession).filter(
-                RoomSession.room_id == room.id,
-                RoomSession.status.in_(ROOM_OCCUPYING_STATUSES),
+        if item.tariff_id:
+            # ── Шүршүүр: хүний төрлийн тасалбар ─────────────
+            #  Өрөө ЭНД сонгогдохгүй — хүн бүр дараалалд орж, дараа нь
+            #  үйлчлэгч тэднийг өрөөнүүдэд чөлөөтэй хуваарилна.
+            tariff = db.query(ShowerTariff).filter(
+                ShowerTariff.id == item.tariff_id, ShowerTariff.is_active == True
             ).first()
-            if occupied:
-                raise HTTPException(status_code=400, detail=f"Өрөө №{room.number} сул биш байна")
-            seen_room_ids.add(room.id)
-
-            rt = room.room_type
-            if not rt:
-                raise HTTPException(status_code=404, detail="Өрөөний төрөл олдсонгүй")
-            subtotal += rt.price
-            pending_sessions.append((len(item_rows), "room", room, rt, 1))
-            item_rows.append(OrderItem(
-                room_id     = room.id,
-                item_type   = "room",
-                item_name   = f"Шүршүүр №{room.number} — {rt.name}",
-                quantity    = 1,
-                unit_price  = rt.price,
-                total_price = rt.price,
-                notes       = item.notes
-            ))
-        elif item.room_type_id:
-            # ── Шүршүүр: дарааллын тасалбар (өрөөгүй) ────────
-            rt = db.query(RoomType).filter(
-                RoomType.id == item.room_type_id, RoomType.is_active == True
-            ).first()
-            if not rt:
-                raise HTTPException(status_code=404, detail="Өрөөний төрөл олдсонгүй")
+            if not tariff:
+                raise HTTPException(status_code=404, detail="Шүршүүрийн тариф олдсонгүй")
             qty = max(1, item.quantity)
-            line_total = rt.price * qty
+            line_total = tariff.price * qty
             subtotal += line_total
-            pending_sessions.append((len(item_rows), "ticket", None, rt, qty))
+            pending_sessions.append((len(item_rows), tariff, qty))
             item_rows.append(OrderItem(
                 item_type   = "room",
-                item_name   = f"Шүршүүр — {rt.name} (дараалал)",
+                item_name   = f"Шүршүүр — {tariff.name}",
                 quantity    = qty,
-                unit_price  = rt.price,
+                unit_price  = tariff.price,
                 total_price = line_total,
                 notes       = item.notes
             ))
@@ -405,14 +462,21 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db), current_us
                 notes       = item.notes
             ))
 
-    # 2. Хямдрал
+    # 2. НӨАТ
+    #  Бараанд «НӨАТ-тэй авах» сонгосон бол үнийг эхлээд +10% болгоно
+    #  (нийт төлөх дүн өснө), дараа нь бүх НӨАТ-тэй мөрөөс задална.
+    _apply_product_vat(item_rows, payload.product_vat)
+    subtotal = sum(r.total_price for r in item_rows)   # барааны үнэ өөрчлөгдсөн
+    vat_amount = _calc_vat(item_rows, payload.product_vat)
+
+    # 3. Хямдрал
     discount_amount = _calc_discount(
         subtotal,
         payload.discount_type.value if payload.discount_type else None,
         payload.discount_value or 0.0
     )
 
-    # 3. Төлбөргүй захиалга эсвэл төлбөртэй
+    # 4. Төлбөргүй захиалга эсвэл төлбөртэй
     is_unpaid = payload.payment_method.value == "unpaid"
 
     # Оноогоор төлбөр тооцоолох (1 оноо = 1₮)
@@ -423,6 +487,7 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db), current_us
             max_points = min(customer.points, int(subtotal - discount_amount))
             points_used = min(payload.points_used, max_points)
 
+    # НӨАТ дүнд багтсан тул нэмэхгүй
     total = max(0.0, subtotal - discount_amount - points_used)
 
     # 4. Earned points (зөвхөн төлбөр төлсөн үед)
@@ -447,6 +512,8 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db), current_us
         discount_type   = payload.discount_type.value if payload.discount_type else None,
         discount_value  = payload.discount_value or 0.0,
         discount_amount = discount_amount,
+        vat_amount      = vat_amount,
+        product_vat     = payload.product_vat,
         total           = total,
         payment_method  = payload.payment_method.value,
         payment_details = payload.payment_details,
@@ -457,13 +524,15 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db), current_us
         paid_by_id      = None if is_unpaid else current_user.id,
         paid_by         = None if is_unpaid else payload.cashier_name,
         notes           = payload.notes,
-        status          = "delivered" if is_shower_only else "pending",
-        delivered_at    = _now_local() if is_shower_only else None,
+        status          = "delivered" if no_laundry_work else "pending",
+        delivered_at    = _now_local() if no_laundry_work else None,
     )
     order.items = item_rows
     db.add(order)
 
-    # 6. Шүршүүрийн session үүсгэх (өрөө эзэмших / дараалалд орох)
+    # 6. Шүршүүрийн session үүсгэх — хүн бүрд НЭГ тасалбар
+    #    Өрөө энд оноогдохгүй: бүгд дараалалд орж, дараа нь үйлчлэгч
+    #    үйлчлүүлэгчийн саналаар өрөөнүүдэд хуваарилна.
     if pending_sessions:
         db.flush()   # order.id болон item_rows[i].id гаргаж авах
 
@@ -473,34 +542,30 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db), current_us
             cust_name = c.name if c else None
         customer_snapshot = cust_name or payload.phone or "—"
 
-        # Дарааллын дугаар — өрөөний ТӨРӨЛ бүрээр тусдаа, өдөр бүр 001-ээс эхэлнэ
+        # Дарааллын дугаар — өдөр бүр ГЛОБАЛ, 001-ээс эхэлнэ.
+        # (Худалдан авах үед өрөөний төрөл тодорхойгүй тул төрлөөр
+        #  салгах боломжгүй болсон.)
         day_start = _now_local().replace(hour=0, minute=0, second=0, microsecond=0)
-        type_counters = {}
+        next_no = db.query(func.max(RoomSession.queue_no)).filter(
+            RoomSession.created_at >= day_start
+        ).scalar() or 0
 
-        def _next_queue_no(type_id: int) -> int:
-            if type_id not in type_counters:
-                type_counters[type_id] = (db.query(func.max(RoomSession.queue_no)).filter(
-                    RoomSession.room_type_id == type_id,
-                    RoomSession.created_at >= day_start,
-                ).scalar() or 0)
-            type_counters[type_id] += 1
-            return type_counters[type_id]
-
-        for idx, kind, room, rt, qty in pending_sessions:
+        for idx, tariff, qty in pending_sessions:
             for _ in range(qty):
-                next_no = _next_queue_no(rt.id)
+                next_no += 1
                 db.add(RoomSession(
-                    room_id       = room.id if kind == "room" else None,
-                    room_type_id  = rt.id,
+                    room_id       = None,
+                    room_type_id  = None,          # өрөө оноогдох үед бөглөгдөнө
+                    tariff_id     = tariff.id,
                     order_id      = order.id,
                     order_item_id = item_rows[idx].id,
                     queue_no      = next_no,
-                    room_number   = room.number if kind == "room" else None,
-                    type_name     = rt.name,
+                    room_number   = None,
+                    type_name     = tariff.name,
                     customer_name = customer_snapshot,
-                    price         = rt.price,
-                    duration_min  = rt.duration_min,
-                    status        = "reserved" if kind == "room" else "waiting",
+                    price         = tariff.price,
+                    duration_min  = 0,   # өрөө оноогдох үед бөглөгдөнө
+                    status        = "waiting",
                 ))
 
     # 7. Үйлчлүүлэгчийн оноо шинэчлэх (зөвхөн төлбөр төлсөн үед)
@@ -509,23 +574,16 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db), current_us
         if customer:
             customer.points = max(0, customer.points - points_used) + points_earned
             customer.total_spent += total
-            customer.total_spent += total
 
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(
-            status_code=400,
-            detail="Өрөө сул биш байна (зэрэг захиалга). Дахин оролдоно уу."
-        )
+    db.commit()
     db.refresh(order)
 
-    # eager load for response
+    # eager load for response (sessions — тасалбар хэвлэхэд шаардлагатай)
     return db.query(Order).options(
         joinedload(Order.customer),
         joinedload(Order.items).joinedload(OrderItem.service),
-        joinedload(Order.items).joinedload(OrderItem.product)
+        joinedload(Order.items).joinedload(OrderItem.product),
+        joinedload(Order.sessions),
     ).filter(Order.id == order.id).first()
 
 
@@ -586,13 +644,18 @@ def add_order_item(order_id: int, payload: OrderItemCreate, db: Session = Depend
             notes       = payload.notes,
         )
 
+    # Шинэ барааны мөрөнд ч захиалгын НӨАТ-ийн сонголт үйлчилнэ
+    #  (хуучин мөрүүд аль хэдийн нэмэгдсэн тул зөвхөн шинийг нь)
+    _apply_product_vat([new_item], bool(o.product_vat))
     o.items.append(new_item)
 
     # Дүнг дахин тооцоолох (хямдрал хувиар бол subtotal-аас дахин бодогдоно)
     subtotal = sum(it.total_price for it in o.items)
     discount_amount = _calc_discount(subtotal, o.discount_type, o.discount_value or 0.0)
+    vat_amount      = _calc_vat(o.items, bool(o.product_vat))
     o.subtotal        = subtotal
     o.discount_amount = discount_amount
+    o.vat_amount      = vat_amount
     o.total           = max(0.0, subtotal - discount_amount - (o.points_used or 0))
 
     db.commit()

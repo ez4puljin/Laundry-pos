@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { X, Printer } from 'lucide-react'
 import dayjs from 'dayjs'
+import toast from 'react-hot-toast'
 import useStore from '../store/useStore'
 import { settingsApi } from '../api/client'
 
@@ -26,16 +27,28 @@ const DEFAULT_RECEIPT = {
   shop_phone: '9900-0000', footer_text: 'Баярлалаа!', footer_sub: 'Дахин ирнэ үү'
 }
 
-/* ─── receipt HTML string for print window ──────────────────────────────── */
-function buildPrintHtml(o, rcpt = DEFAULT_RECEIPT) {
-  const date = dayjs(o.created_at).format('YYYY/MM/DD  HH:mm')
+/* ─── НӨАТ (ХОЛИМОГ загвар) ───────────────────────────────────────────────
+   * Үйлчилгээ ба шүршүүр — үнэ нь НӨАТ БАГТСАН (5000₮ → 5000₮ төлнө).
+   * Бараа — «НӨАТ-тэй авах» сонгосон бол backend үнийг нь аль хэдийн
+     +10% болгож хадгалсан (500₮ → 550₮), тиймээс энд ч «багтсан» гэж
+     үзэж нэг ижил томьёогоор (дүн/11) задална. Сонгоогүй бол НӨАТ-гүй. */
+const VAT_RATE = 0.10
 
-  return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8"/>
-  <title>Баримт - ${o.order_number}</title>
-  <style>
+const lineHasVat = (item, productVat) =>
+  item.item_type === 'service' || item.item_type === 'room' ||
+  (item.item_type === 'product' && productVat)
+
+/** Тухайн мөрүүдийн дүн ба тэр дотор багтсан НӨАТ */
+function sumLines(items, productVat) {
+  const sub = items.reduce((s, i) => s + i.total_price, 0)
+  const base = items.reduce(
+    (s, i) => lineHasVat(i, productVat) ? s + i.total_price : s, 0)
+  const vat = Math.round(base * VAT_RATE / (1 + VAT_RATE))
+  return { sub, vat, total: sub }   // НӨАТ дүнд багтсан тул нэмэхгүй
+}
+
+/* ─── Хэвлэх бичиг баримтын нийтлэг хэв маяг ─────────────────────────── */
+const PRINT_CSS = `
     @page {
       size: 80mm auto;
       margin: 0;
@@ -53,12 +66,16 @@ function buildPrintHtml(o, rcpt = DEFAULT_RECEIPT) {
       print-color-adjust: exact;
     }
     .wrap  { width: 80mm; padding: 2mm 3mm 8mm; }
+    /* Хуудас бүр тусдаа цаас — термал принтер тус бүрийг таслана */
+    .page  { page-break-after: always; break-after: page; }
+    .page:last-child { page-break-after: auto; break-after: auto; }
     .c     { text-align: center; }
     .r     { text-align: right; }
     .b     { font-weight: 900; }
     .xl    { font-size: 18px; font-weight: 900; letter-spacing: 1px; }
     .lg    { font-size: 16px; font-weight: 900; }
     .sm    { font-size: 12px; font-weight: 700; }
+    .qno   { font-size: 46px; font-weight: 900; letter-spacing: 3px; line-height: 1.1; }
     .dash  { border: none; border-top: 1px dashed #000; margin: 3mm 0; }
     .solid { border: none; border-top: 3px solid  #000; margin: 2mm 0; }
     table  { width: 100%; border-collapse: collapse; }
@@ -66,16 +83,102 @@ function buildPrintHtml(o, rcpt = DEFAULT_RECEIPT) {
     .td-r  { text-align: right; white-space: nowrap; padding-left: 2mm; }
     .td-l  { text-align: left; }
     .total-row td { padding-top: 2mm; font-size: 17px; font-weight: 900; }
-  </style>
+`
+
+/* ─── Шүршүүрийн ТАСАЛБАР (хүн тус бүрд нэг цаас) ───────────────────── */
+function ticketPage(s, o, rcpt) {
+  const date = dayjs(o.created_at).format('YYYY/MM/DD  HH:mm')
+  const qno  = String(s.queue_no).padStart(3, '0')
+  return `
+<div class="wrap page">
+  <div class="c">
+    <div class="xl">${rcpt.shop_name}</div>
+    <div class="b" style="letter-spacing:4px; margin-top:1mm">ТАСАЛБАР</div>
+  </div>
+
+  <hr class="solid"/>
+
+  <div class="c">
+    <div class="sm" style="letter-spacing:3px">ООЧИР</div>
+    <div class="qno">№${qno}</div>
+    <div class="lg" style="margin-top:2mm">${s.type_name || 'Шүршүүр'}</div>
+    <div class="b" style="margin-top:1mm">${s.price.toLocaleString()}₮</div>
+  </div>
+
+  <hr class="dash"/>
+
+  <table>
+    <tr>
+      <td class="td-l sm">Захиалга №</td>
+      <td class="td-r b">${o.order_number}</td>
+    </tr>
+    <tr>
+      <td class="td-l sm">Огноо</td>
+      <td class="td-r">${date}</td>
+    </tr>
+    <tr>
+      <td class="td-l sm">Кассчин</td>
+      <td class="td-r">${o.cashier_name}</td>
+    </tr>
+  </table>
+
+  <hr class="dash"/>
+
+  <div class="c">
+    <div class="sm">Дугаараа дуудахад өрөөнд орно уу</div>
+    <div style="margin-top:4mm; font-size:16px; font-weight:900; letter-spacing:2px">
+      ★  ${rcpt.footer_text}  ★
+    </div>
+  </div>
+</div>`
+}
+
+/* ─── receipt HTML string for print window ──────────────────────────────── */
+function buildPrintHtml(o, rcpt = DEFAULT_RECEIPT) {
+  const sessions  = o.sessions || []
+  // Шүршүүрийн мөрүүд тасалбар болж хэвлэгдсэн тул баримтад давхардуулахгүй
+  const goodsOnly = (o.items || []).filter(i => i.item_type !== 'room')
+
+  const pages = sessions.length
+    ? [
+        ...sessions.map(s => ticketPage(s, o, rcpt)),
+        // Бараа авсан үед л нэмэлт баримт хэвлэнэ
+        ...(goodsOnly.length ? [receiptPage(o, rcpt, goodsOnly, true)] : []),
+      ]
+    : [receiptPage(o, rcpt, o.items || [], false)]
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Баримт - ${o.order_number}</title>
+  <style>${PRINT_CSS}</style>
 </head>
 <body>
-<div class="wrap">
+${pages.join('\n')}
+</body>
+</html>`
+}
+
+/* ─── Бараа / үйлчилгээний баримт ────────────────────────────────────────
+   goodsOnly=true үед зөвхөн жагсаасан мөрүүдийн дүнг харуулна
+   (шүршүүрийн тасалбарууд тусад нь хэвлэгдсэн).                         */
+function receiptPage(o, rcpt, items, goodsOnly) {
+  const date = dayjs(o.created_at).format('YYYY/MM/DD  HH:mm')
+  const g = sumLines(items, o.product_vat)
+  const subtotal = goodsOnly ? g.sub   : o.subtotal
+  const vat      = goodsOnly ? g.vat   : (o.vat_amount || 0)
+  const total    = goodsOnly ? g.total : o.total
+
+  return `
+<div class="wrap page">
 
   <!-- HEADER -->
   <div class="c">
     <div class="xl">${rcpt.shop_name}</div>
     <div class="b">${rcpt.shop_desc}</div>
     <div class="sm">Утас: ${rcpt.shop_phone}</div>
+    ${goodsOnly ? '<div class="b" style="letter-spacing:2px; margin-top:1mm">БАРАА МАТЕРИАЛ</div>' : ''}
   </div>
 
   <hr class="solid"/>
@@ -118,7 +221,7 @@ function buildPrintHtml(o, rcpt = DEFAULT_RECEIPT) {
 
   <!-- ITEMS -->
   <table>
-    ${o.items.map(item => {
+    ${items.map(item => {
       const name = item.item_name || item.service?.name || item.product?.name || '—'
       const tag  = item.item_type === 'product' ? ' <span class="sm">[бараа]</span>' : ''
       return `<tr>
@@ -132,17 +235,21 @@ function buildPrintHtml(o, rcpt = DEFAULT_RECEIPT) {
 
   <hr class="dash"/>
 
-  <!-- SUBTOTAL + DISCOUNTS -->
+  <!-- SUBTOTAL + НӨАТ + DISCOUNTS -->
   <table>
     <tr>
       <td class="td-l sm">Дэд дүн</td>
-      <td class="td-r">${o.subtotal.toLocaleString()}₮</td>
+      <td class="td-r">${subtotal.toLocaleString()}₮</td>
     </tr>
-    ${o.discount_amount > 0 ? `<tr>
+    ${vat > 0 ? `<tr>
+      <td class="td-l sm">үүнд НӨАТ (10%)</td>
+      <td class="td-r">${vat.toLocaleString()}₮</td>
+    </tr>` : ''}
+    ${!goodsOnly && o.discount_amount > 0 ? `<tr>
       <td class="td-l sm">Хямдрал (${o.discount_type === 'percent' ? o.discount_value + '%' : 'дүн'})</td>
       <td class="td-r b">-${o.discount_amount.toLocaleString()}₮</td>
     </tr>` : ''}
-    ${o.points_used > 0 ? `<tr>
+    ${!goodsOnly && o.points_used > 0 ? `<tr>
       <td class="td-l sm">Оноо (${o.points_used} оноо)</td>
       <td class="td-r b">-${o.points_used.toLocaleString()}₮</td>
     </tr>` : ''}
@@ -153,8 +260,8 @@ function buildPrintHtml(o, rcpt = DEFAULT_RECEIPT) {
   <!-- TOTAL -->
   <table>
     <tr class="total-row">
-      <td class="td-l">НИЙТ</td>
-      <td class="td-r">${o.total.toLocaleString()}₮</td>
+      <td class="td-l">${goodsOnly ? 'БАРААНЫ ДҮН' : 'НИЙТ'}</td>
+      <td class="td-r">${total.toLocaleString()}₮</td>
     </tr>
   </table>
 
@@ -210,19 +317,13 @@ function buildPrintHtml(o, rcpt = DEFAULT_RECEIPT) {
 
   <!-- STATUS + FOOTER -->
   <div class="c">
-    <div>Статус: <span class="b">${STATUS_LABELS[o.status] || o.status}</span></div>
+    ${goodsOnly ? '' : `<div>Статус: <span class="b">${STATUS_LABELS[o.status] || o.status}</span></div>`}
     <div style="margin-top:5mm; font-size:17px; font-weight:900; letter-spacing:2px">★  ${rcpt.footer_text}  ★</div>
     <div style="margin-top:1mm">${rcpt.footer_sub}</div>
     <div style="margin-top:4mm; font-size:12px">${dayjs().format('YYYY-MM-DD HH:mm:ss')}</div>
   </div>
 
-</div>
-</body>
-</html>`
-}
-
-function padLeft(str, total) {
-  return str.padStart(total)
+</div>`
 }
 
 /* ─── Modal ─────────────────────────────────────────────────────────────── */
@@ -237,9 +338,27 @@ export default function Receipt() {
   if (!showReceiptModal || !lastOrder) return null
 
   const o = lastOrder
+  // Шүршүүрийн захиалга: хүн бүрд тасалбар + (бараатай бол) нэмэлт баримт
+  const sessions  = o.sessions || []
+  const goodsOnly = sessions.length > 0
+  const items     = goodsOnly
+    ? (o.items || []).filter(i => i.item_type !== 'room')
+    : (o.items || [])
+  const g        = sumLines(items, o.product_vat)
+  const subtotal = goodsOnly ? g.sub   : o.subtotal
+  const vat      = goodsOnly ? g.vat   : (o.vat_amount || 0)
+  const total    = goodsOnly ? g.total : o.total
+  const pageCount = sessions.length + (goodsOnly ? (items.length ? 1 : 0) : 1)
 
   const handlePrint = () => {
+    // Бүх хуудсыг НЭГ цонхонд бэлдэнэ — тасалбар бүр page-break-ээр
+    // тусдаа цаас болно. Олон цонх нээвэл хөтөч блоклодог.
     const w = window.open('', '_blank', 'width=340,height=700,scrollbars=yes')
+    if (!w) {
+      toast.error('Хэвлэх цонх нээгдсэнгүй. Хөтчийн popup зөвшөөрнө үү.',
+                  { id: 'print-blocked' })
+      return
+    }
     w.document.write(buildPrintHtml(o, rcpt))
     w.document.close()
     setTimeout(() => { w.focus(); w.print() }, 400)
@@ -253,7 +372,14 @@ export default function Receipt() {
 
         {/* ── Toolbar ── */}
         <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
-          <h2 className="font-bold text-base text-gray-800">🧾 Баримт</h2>
+          <h2 className="font-bold text-base text-gray-800">
+            🧾 Баримт
+            {pageCount > 1 && (
+              <span className="ml-1.5 text-xs font-medium text-gray-500">
+                {pageCount} хуудас
+              </span>
+            )}
+          </h2>
           <div className="flex gap-2">
             <button
               onClick={handlePrint}
@@ -272,8 +398,47 @@ export default function Receipt() {
         </div>
 
         {/* ── Receipt preview (thermal paper style) ── */}
-        <div className="overflow-y-auto flex-1 bg-gray-100 p-4">
-          {/* Paper effect */}
+        <div className="overflow-y-auto flex-1 bg-gray-100 p-4 space-y-4">
+
+          {/* ── Хүн тус бүрийн тасалбар ── */}
+          {sessions.map(s => (
+            <div key={s.id} className="mx-auto bg-white shadow-lg"
+                 style={{
+                   width: '100%', maxWidth: '302px',
+                   fontFamily: "'Courier New', Courier, monospace",
+                   fontWeight: '700', color: '#000',
+                   padding: '10px 10px 16px',
+                   boxShadow: '0 2px 8px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.05)',
+                 }}>
+              <div className="text-center">
+                <div className="font-black tracking-wide" style={{ fontSize: '15px' }}>{rcpt.shop_name}</div>
+                <div className="font-black" style={{ fontSize: '13px', letterSpacing: '3px' }}>ТАСАЛБАР</div>
+              </div>
+              <Solid />
+              <div className="text-center">
+                <div style={{ fontSize: '11px', letterSpacing: '2px' }}>ООЧИР</div>
+                <div className="font-black" style={{ fontSize: '38px', lineHeight: 1.1 }}>
+                  №{String(s.queue_no).padStart(3, '0')}
+                </div>
+                <div className="font-black mt-1" style={{ fontSize: '14px' }}>{s.type_name}</div>
+                <div className="font-black" style={{ fontSize: '13px' }}>
+                  {s.price.toLocaleString()}₮
+                </div>
+              </div>
+              <Dash />
+              <div className="space-y-0.5" style={{ fontSize: '11px' }}>
+                <Row label="Захиалга №" value={o.order_number} bold />
+                <Row label="Огноо" value={dayjs(o.created_at).format('YYYY/MM/DD HH:mm')} />
+              </div>
+              <Dash />
+              <div className="text-center" style={{ fontSize: '11px' }}>
+                Дугаараа дуудахад өрөөнд орно уу
+              </div>
+            </div>
+          ))}
+
+          {/* ── Бараа / үйлчилгээний баримт ── */}
+          {(!goodsOnly || items.length > 0) && (
           <div className="mx-auto bg-white shadow-lg"
                style={{
                  width: '100%', maxWidth: '302px',
@@ -291,6 +456,11 @@ export default function Receipt() {
               <div className="font-black tracking-wide" style={{ fontSize: '16px' }}>{rcpt.shop_name}</div>
               <div className="font-bold" style={{ fontSize: '13px' }}>{rcpt.shop_desc}</div>
               <div style={{ fontSize: '12px' }}>Утас: {rcpt.shop_phone}</div>
+              {goodsOnly && (
+                <div className="font-black" style={{ fontSize: '12px', letterSpacing: '2px' }}>
+                  БАРАА МАТЕРИАЛ
+                </div>
+              )}
             </div>
 
             <Solid />
@@ -316,7 +486,7 @@ export default function Receipt() {
 
             {/* ── Items ── */}
             <div className="space-y-1 mb-1" style={{ fontSize: '13px' }}>
-              {o.items.map((item, i) => {
+              {items.map((item, i) => {
                 const name = item.item_name || item.service?.name || item.product?.name || '—'
                 return (
                   <div key={i}>
@@ -342,13 +512,16 @@ export default function Receipt() {
 
             {/* ── Subtotals ── */}
             <div className="space-y-0.5 mb-1" style={{ fontSize: '12px' }}>
-              <Row label="Дэд дүн" value={`${o.subtotal.toLocaleString()}₮`} />
-              {o.discount_amount > 0 && (
+              <Row label="Дэд дүн" value={`${subtotal.toLocaleString()}₮`} />
+              {vat > 0 && (
+                <Row label="үүнд НӨАТ (10%)" value={`${vat.toLocaleString()}₮`} />
+              )}
+              {!goodsOnly && o.discount_amount > 0 && (
                 <Row label={`Хямдрал${o.discount_type === 'percent' ? ` (${o.discount_value}%)` : ''}`}
                      value={`-${o.discount_amount.toLocaleString()}₮`}
                      bold />
               )}
-              {o.points_used > 0 && (
+              {!goodsOnly && o.points_used > 0 && (
                 <Row label={`Оноо (${o.points_used})`}
                      value={`-${o.points_used.toLocaleString()}₮`}
                      bold />
@@ -359,8 +532,8 @@ export default function Receipt() {
 
             {/* ── Total ── */}
             <div className="flex justify-between font-black py-0.5" style={{ fontSize: '16px' }}>
-              <span>НИЙТ</span>
-              <span>{o.total.toLocaleString()}₮</span>
+              <span>{goodsOnly ? 'БАРААНЫ ДҮН' : 'НИЙТ'}</span>
+              <span>{total.toLocaleString()}₮</span>
             </div>
 
             <Solid />
@@ -387,7 +560,7 @@ export default function Receipt() {
             </div>
 
             {/* ── Points info ── */}
-            {o.customer && (
+            {!goodsOnly && o.customer && (
               <>
                 <Dash />
                 <div>
@@ -411,7 +584,9 @@ export default function Receipt() {
 
             {/* ── Status + footer ── */}
             <div className="text-center space-y-0.5" style={{ fontSize: '12px' }}>
-              <div>Статус: <span className="font-black">{STATUS_LABELS[o.status] || o.status}</span></div>
+              {!goodsOnly && (
+                <div>Статус: <span className="font-black">{STATUS_LABELS[o.status] || o.status}</span></div>
+              )}
               <div className="font-black tracking-widest mt-2" style={{ fontSize: '15px' }}>★  {rcpt.footer_text}  ★</div>
               <div style={{ fontSize: '12px' }}>{rcpt.footer_sub}</div>
               <div className="mt-2" style={{ fontSize: '11px' }}>
@@ -420,6 +595,7 @@ export default function Receipt() {
             </div>
 
           </div>
+          )}
         </div>
 
       </div>

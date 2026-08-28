@@ -18,14 +18,15 @@ const SINGLE_METHODS = [
 export default function Cart({ onOrderComplete }) {
   const {
     cart, customer, orderPhone, discount, couponCode, pointsToUse,
-    paymentMethod, mixedAmounts,
+    paymentMethod, mixedAmounts, productVat,
     updateQuantity, removeFromCart, setDiscount, setCouponCode,
-    setPointsToUse, setPaymentMethod, setMixedAmounts, clearCart,
-    getSubtotal, getDiscountAmount, getTotal, getItemPrice, setLastOrder
+    setPointsToUse, setPaymentMethod, setMixedAmounts, setProductVat, clearCart,
+    getSubtotal, getDiscountAmount, getVatAmount, getTotal, getItemPrice, setLastOrder
   } = useStore()
 
   // Шүршүүр сагсанд байвал «Дараа төлөх» боломжгүй
-  const hasShower = cart.some(i => i.itemType === 'room' || i.itemType === 'ticket')
+  const hasShower   = cart.some(i => i.itemType === 'ticket')
+  const hasProducts = cart.some(i => i.itemType === 'product')
 
   const authUser = useAuthStore(s => s.user)
 
@@ -79,8 +80,16 @@ export default function Cart({ onOrderComplete }) {
     return () => window.removeEventListener('keydown', handler)
   }, [cart, submitting, paymentMethod, mixedAmounts, customer, orderPhone, pointsToUse, hasShower])
 
+  // Бараанд НӨАТ нэмснээр нийт дүн хэдээр өссөнийг харуулна
+  const productVatAdded = productVat
+    ? cart.reduce((s, i) => i.itemType === 'product'
+        ? s + (Math.round(i.item.sale_price * 1.1) - i.item.sale_price) * i.quantity
+        : s, 0)
+    : 0
+
   const subtotal        = getSubtotal()
   const discountAmount  = getDiscountAmount()
+  const vatAmount       = getVatAmount()
   const total           = getTotal()
 
   const applyDiscount = () => {
@@ -143,8 +152,7 @@ export default function Cart({ onOrderComplete }) {
           const base = { quantity: i.quantity, notes: i.notes || null }
           switch (i.itemType) {
             case 'service': return { ...base, service_id: i.item.id }
-            case 'room':    return { ...base, room_id: i.item.id, quantity: 1 }
-            case 'ticket':  return { ...base, room_type_id: i.item.id }
+            case 'ticket':  return { ...base, tariff_id: i.item.id }
             default:        return { ...base, product_id: i.item.id }
           }
         }),
@@ -153,6 +161,7 @@ export default function Cart({ onOrderComplete }) {
         payment_method:  paymentMethod,
         payment_details: paymentDetails,
         points_used:     pointsToUse,
+        product_vat:     productVat,
         notes:           null,
         cashier_name:    authUser?.full_name || 'Кассчин',
       }
@@ -182,19 +191,10 @@ export default function Cart({ onOrderComplete }) {
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
         {cart.map((ci) => {
           const { key, itemType, item, quantity, notes } = ci
-          const price   = getItemPrice(ci)
-          const isRoom  = itemType === 'room'
+          const price    = getItemPrice(ci)
           const isTicket = itemType === 'ticket'
-          const title = isRoom
-            ? `Шүршүүр №${item.number}`
-            : isTicket
-              ? `Шүршүүр — ${item.name}`
-              : item.name
-          const subtitle = isRoom
-            ? `${item.room_type?.name} · ${item.room_type?.duration_min}мин`
-            : isTicket
-              ? `Дараалал · ${item.duration_min}мин`
-              : null
+          const title    = isTicket ? `Шүршүүр — ${item.name}` : item.name
+          const subtitle = isTicket ? `${quantity} тасалбар` : null
           return (
             <div key={key} className="bg-white rounded-xl p-3 border border-gray-100 shadow-sm">
               <div className="flex items-start justify-between">
@@ -207,7 +207,7 @@ export default function Cart({ onOrderComplete }) {
                         <Package className="w-3 h-3" />
                       </span>
                     )}
-                    {(isRoom || isTicket) && (
+                    {isTicket && (
                       <span className="inline-flex items-center gap-0.5 text-xs bg-cyan-100
                                        text-cyan-700 px-1.5 py-0.5 rounded-full font-medium">
                         <ShowerHead className="w-3 h-3" />
@@ -218,27 +218,21 @@ export default function Cart({ onOrderComplete }) {
                   <p className="text-xs text-gray-400">{price.toLocaleString()}₮ × {quantity}</p>
                 </div>
                 <div className="flex items-center gap-1 ml-2">
-                  {isRoom ? (
-                    <span className="w-6 text-center text-sm font-bold">1</span>
-                  ) : (
-                    <>
-                      <button
-                        onClick={() => updateQuantity(key, quantity - 1)}
-                        className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center
-                                   hover:bg-gray-200 transition-colors"
-                      >
-                        <Minus className="w-3 h-3" />
-                      </button>
-                      <span className="w-6 text-center text-sm font-bold">{quantity}</span>
-                      <button
-                        onClick={() => updateQuantity(key, quantity + 1)}
-                        className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center
-                                   hover:bg-blue-200 transition-colors"
-                      >
-                        <Plus className="w-3 h-3 text-blue-600" />
-                      </button>
-                    </>
-                  )}
+                  <button
+                    onClick={() => updateQuantity(key, quantity - 1)}
+                    className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center
+                               hover:bg-gray-200 transition-colors"
+                  >
+                    <Minus className="w-3 h-3" />
+                  </button>
+                  <span className="w-6 text-center text-sm font-bold">{quantity}</span>
+                  <button
+                    onClick={() => updateQuantity(key, quantity + 1)}
+                    className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center
+                               hover:bg-blue-200 transition-colors"
+                  >
+                    <Plus className="w-3 h-3 text-blue-600" />
+                  </button>
                   <button
                     onClick={() => removeFromCart(key)}
                     className="w-7 h-7 rounded-full bg-red-50 flex items-center justify-center
@@ -450,11 +444,51 @@ export default function Cart({ onOrderComplete }) {
 
       {/* Totals + Checkout */}
       <div className="border-t bg-white px-4 pt-3 pb-4">
+        {/* Бараа материалыг НӨАТ-тэй авах эсэх.
+            Үйлчилгээ/шүршүүрийн үнэд НӨАТ аль хэдийн багтсан тул
+            энэ сонголт ЗӨВХӨН бараанд үйлчилж, үнийг нь +10% болгоно. */}
+        {hasProducts && (
+          <label className={`flex items-start gap-2 mb-2 px-2.5 py-2 rounded-lg border
+                             cursor-pointer select-none transition-colors
+                             ${productVat
+                               ? 'bg-blue-50 border-blue-200 hover:bg-blue-100'
+                               : 'bg-gray-50 border-gray-100 hover:bg-gray-100'}`}>
+            <input
+              type="checkbox"
+              checked={productVat}
+              onChange={e => setProductVat(e.target.checked)}
+              className="w-4 h-4 mt-0.5 rounded accent-blue-600 shrink-0"
+            />
+            <span className="min-w-0">
+              <span className="block text-xs font-semibold text-gray-800">
+                Бараа НӨАТ-тэй авах
+              </span>
+              <span className="block text-[11px] text-gray-500 leading-snug">
+                {productVat
+                  ? 'Барааны үнэ +10% болж, НӨАТ-тэй баримт гарна'
+                  : 'Барааны үнэ хэвээр, НӨАТ гарахгүй'}
+              </span>
+            </span>
+          </label>
+        )}
+
         <div className="space-y-1 text-sm mb-3">
           <div className="flex justify-between text-gray-500">
-            <span>Нийт дүн</span>
+            <span>Дэд дүн</span>
             <span>{subtotal.toLocaleString()}₮</span>
           </div>
+          {vatAmount > 0 && (
+            <div className="flex justify-between text-gray-400">
+              <span>үүнд НӨАТ (10%)</span>
+              <span>{vatAmount.toLocaleString()}₮</span>
+            </div>
+          )}
+          {hasProducts && productVat && (
+            <div className="flex justify-between text-blue-600">
+              <span>Барааны НӨАТ нэмэгдсэн</span>
+              <span>+{productVatAdded.toLocaleString()}₮</span>
+            </div>
+          )}
           {discountAmount > 0 && (
             <div className="flex justify-between text-green-600">
               <span>Хямдрал</span>

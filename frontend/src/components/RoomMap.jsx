@@ -56,11 +56,19 @@ function RoomCell({ room, onClick, selected }) {
   const timeCls = density === 'full' ? 'text-sm'   : density === 'mid' ? 'text-xs' : 'text-[10px]'
   const typeCls = density === 'full' ? 'text-[10px]' : 'text-[9px]'
 
+  // Өрөөнд олон хүн зэрэг байж болно — бүх оочирыг тайлбарт харуулна
+  const guests = room.active_sessions?.length
+    ? room.active_sessions
+    : (session ? [session] : [])
+
   const tip = [
     `Өрөө №${room.number}`,
     room.room_type?.name,
     overdue ? 'Хугацаа хэтэрсэн!' : meta.label,
-    session?.queue_no > 0 ? `Оочир ${queueLabel(session.queue_no)}` : null,
+    guests.length
+      ? `Оочир ${guests.map(g => queueLabel(g.queue_no)).join(', ')}`
+      : null,
+    guests.length > 1 ? `${guests.length} хүн` : null,
     status === 'in_use' ? `Үлдсэн ${timeLabel}` : null,
   ].filter(Boolean).join(' · ')
 
@@ -82,6 +90,14 @@ function RoomCell({ room, onClick, selected }) {
       {density === 'tiny' && (
         <span className={`absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full
                           ${overdue ? 'bg-red-500' : meta.dot}`} />
+      )}
+
+      {/* Олон хүнтэй өрөө — зүүн дээд буланд ×N */}
+      {guests.length > 1 && (
+        <span className="absolute top-0.5 left-0.5 px-1 rounded bg-cyan-600 text-white
+                         text-[9px] font-bold leading-tight">
+          ×{guests.length}
+        </span>
       )}
 
       {/* Ашиглаж байгаа жижиг нүдэнд таймер дугаараас чухал */}

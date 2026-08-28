@@ -55,6 +55,11 @@ export default function RoomActionModal({ room, role, onClose, onDone }) {
 
   const status  = roomStatus(room)
   const meta    = STATUS_META[status]
+  // Өрөөнд олон хүн зэрэг байж болно. active_session нь хамгийн урт
+  // хугацаатай оршин суугч — таймер түүгээр тоологдоно.
+  const sessions = room.active_sessions?.length
+    ? room.active_sessions
+    : (room.active_session ? [room.active_session] : [])
   const session = room.active_session
   const action  = ROOM_ACTIONS[status]
   const allowed = action && action.roles.includes(role)
@@ -79,7 +84,10 @@ export default function RoomActionModal({ room, role, onClose, onDone }) {
         <div className="flex items-center justify-between p-4 border-b border-gray-200">
           <div className="min-w-0">
             <h3 className="font-bold text-gray-800">Өрөө №{room.number}</h3>
-            <p className="text-xs text-gray-500 truncate">{room.room_type?.name}</p>
+            <p className="text-xs text-gray-500 truncate">
+              {room.room_type?.name}
+              {sessions.length > 1 && ` · ${sessions.length} хүн`}
+            </p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100"><X size={18} /></button>
         </div>
@@ -102,21 +110,25 @@ export default function RoomActionModal({ room, role, onClose, onDone }) {
             )}
           </div>
 
-          {session && (
-            <div className="text-xs text-gray-600 space-y-1">
-              {session.queue_no > 0 && (
-                <div className="flex justify-between">
-                  <span className="text-gray-400">Оочир</span>
-                  <span className="font-bold text-amber-700 bg-amber-50 px-1.5 rounded">{queueLabel(session.queue_no)}</span>
+          {sessions.length > 0 && (
+            <div className="text-xs text-gray-600 space-y-1.5">
+              {/* Оршин суугч бүр — оочир, төрөл */}
+              {sessions.map(s => (
+                <div key={s.id} className="flex items-center gap-2">
+                  <span className="font-bold text-amber-700 bg-amber-50 px-1.5 rounded tabular-nums">
+                    {queueLabel(s.queue_no)}
+                  </span>
+                  <span className="truncate flex-1">{s.type_name}</span>
+                  <span className="text-gray-400 shrink-0">{s.duration_min}мин</span>
                 </div>
-              )}
-              {session.customer_name && (
-                <div className="flex justify-between">
+              ))}
+              {session?.customer_name && (
+                <div className="flex justify-between pt-1 border-t border-gray-100">
                   <span className="text-gray-400">Үйлчлүүлэгч</span>
                   <span className="truncate ml-2">{session.customer_name}</span>
                 </div>
               )}
-              {session.cleaned_by && status === 'cleaning' && (
+              {session?.cleaned_by && status === 'cleaning' && (
                 <div className="flex justify-between">
                   <span className="text-gray-400">Үйлчлэгч</span>
                   <span className="truncate ml-2">{session.cleaned_by}</span>
