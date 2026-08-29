@@ -31,9 +31,12 @@ def verify_password(plain: str, hashed: str) -> bool:
         return False
 
 
-def create_access_token(user_id: int, role: str) -> str:
+def create_access_token(user_id: int, role: str, branch: str = "") -> str:
+    """Токенд САЛБАРЫГ шингээнэ — header солиод өөр салбар руу орохгүй."""
     expire  = datetime.now(timezone.utc) + timedelta(hours=TOKEN_HOURS)
     payload = {"sub": str(user_id), "role": role, "exp": expire}
+    if branch:
+        payload["branch"] = branch
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
@@ -68,5 +71,47 @@ def require_admin(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Зөвхөн админ хандах боломжтой",
+        )
+    return current_user
+
+
+# ── Нягтлан (accountant) ─────────────────────────────────
+# Нягтлан нь БҮХ салбарт хүчинтэй глобал хэрэглэгч. Санхүү бүрэн эрхтэй,
+# Бараа материал ба Үйлчилгээг засна, бусдыг зөвхөн ХАРНА.
+BOOKKEEPING_ROLES = ("admin", "accountant")
+
+
+def require_bookkeeping(
+    current_user: "models.User" = Depends(get_current_user),
+) -> "models.User":
+    """Санхүү / Бараа материал / Үйлчилгээ засах эрх."""
+    if current_user.role not in BOOKKEEPING_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Зөвхөн админ болон нягтлан хандах боломжтой",
+        )
+    return current_user
+
+
+def require_report_view(
+    current_user: "models.User" = Depends(get_current_user),
+) -> "models.User":
+    """Тайлан харах эрх — админ ба нягтлан."""
+    if current_user.role not in BOOKKEEPING_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Тайлан харах эрхгүй байна",
+        )
+    return current_user
+
+
+def require_global(
+    current_user: "models.User" = Depends(get_current_user),
+) -> "models.User":
+    """Салбар хооронд шилжих, глобал хэрэглэгч удирдах эрх."""
+    if not current_user.is_global:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Зөвхөн бүх салбарын эрхтэй хэрэглэгч хандана",
         )
     return current_user

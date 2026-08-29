@@ -13,7 +13,8 @@ log = logging.getLogger("sms")
 
 
 def _get_sms_config():
-    """Тохиргоог os.environ-оос шууд уншиж авах (settings API шинэчлэлтийг тусгана)"""
+    """Нөөц тохиргоо. Ердийн үед дуудагч нь САЛБАРЫН тохиргоог дамжуулна
+    (settings_store.sms_config) — salbar бүр өөрийн gateway-тэй байж болно."""
     return {
         "url": os.getenv("SMS_GATEWAY_URL", "http://192.168.1.71:8080"),
         "username": os.getenv("SMS_GATEWAY_USERNAME", "sms"),
@@ -21,7 +22,7 @@ def _get_sms_config():
         "enabled": os.getenv("SMS_ENABLED", "true").lower() == "true",
         "template": os.getenv(
             "SMS_TEMPLATE",
-            "Таны угаалга бэлэн боллоо. Цэмбий өөртөө үйлчлэх угаалга"
+            "Таны угаалга бэлэн боллоо."
         ),
     }
 
@@ -38,12 +39,14 @@ def _format_phone(phone: str) -> str:
     return phone
 
 
-def send_ready_sms(phone: str, order_number: str = "") -> bool:
+def send_ready_sms(phone: str, order_number: str = "", config: dict = None) -> bool:
     """
     Захиалга бэлэн болсон үед SMS явуулах.
+    `config` — салбарын тохиргоо (settings_store.sms_config). Өгөөгүй бол
+    .env-ийн нөөц утгыг ашиглана.
     Амжилттай бол True, алдаа гарвал False буцаана.
     """
-    cfg = _get_sms_config()
+    cfg = config or _get_sms_config()
 
     if not cfg["enabled"]:
         log.info(f"[SMS] Disabled - not sent ({phone})")

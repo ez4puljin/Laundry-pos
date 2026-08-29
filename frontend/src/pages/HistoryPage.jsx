@@ -34,6 +34,9 @@ const PAYMENT_INFO = {
 }
 
 // Төлсөн төлбөрийн хэлбэрээр шүүх
+// Нэг удаад татах захиалгын тоо (backend-ийн HISTORY_PAGE_SIZE-тай тэнцүү)
+const PAGE = 100
+
 const PAY_FILTERS = [
   { value: '',         label: 'Бүх төлбөр' },
   { value: 'cash',     label: 'Бэлэн'      },
@@ -58,6 +61,10 @@ export default function HistoryPage() {
   const [activeQuick, setActiveQuick] = useState(0)
   const [kind,        setKind]        = useState('')  // '' | 'laundry' | 'shower'
   const [payMethod,   setPayMethod]   = useState('')  // '' = бүх төлбөр
+  // Хуудаслалт — жилийн түүх татахад хөтөч гацахгүй байхын тулд
+  const [summary,   setSummary]   = useState(null)   // серверээс бодсон нийлбэр
+  const [hasMore,   setHasMore]   = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [expandedId,  setExpandedId]  = useState(null)
   const [usagesMap,   setUsagesMap]   = useState({})  // orderId → usages[]
 
@@ -80,28 +87,56 @@ export default function HistoryPage() {
         ...(k  ? { kind: k }            : {}),
         ...(pm ? { payment_method: pm } : {}),
       }
-      const promises = [
-        // Хугацааны бүх захиалга (устгагдсанаас бусад) — төлөв нь мөр бүр дээр харагдана
-        ordersApi.list(base),
+      const [active, late, deleted, sum] = await Promise.all([
+        // Эхний хуудас — цааш нь «Цааш үзэх» товчоор нэмнэ
+        ordersApi.list({ ...base, limit: PAGE }),
         // Өмнөх өдрийн захиалгын төлбөрийг энэ хугацаанд нөхөж авсан
         ordersApi.latePayments({ date_from: from, date_to: to }),
-      ]
-      if (isAdmin) {
-        promises.push(ordersApi.list({ ...base, status: 'deleted' }))
-      }
-      const [active, late, deleted] = await Promise.all(promises)
+        isAdmin ? ordersApi.list({ ...base, status: 'deleted', limit: PAGE })
+                : Promise.resolve(null),
+        // Нийт дүнг СЕРВЕР бүтэн хугацаанд нь бодно
+        ordersApi.summary(base),
+      ])
 
       const byId = new Map()
       for (const r of [active, deleted]) {
         for (const o of (r?.data || [])) byId.set(o.id, o)
       }
 
-      setOrders([...byId.values()].sort(
+      const list = [...byId.values()].sort(
         (a, b) => new Date(b.created_at) - new Date(a.created_at)
-      ))
+      )
+      setOrders(list)
       setLateOrders(late.data || [])
+      setSummary(sum?.data || null)
+      // Идэвхтэй захиалга бүтэн хуудас ирсэн бол цааш байж магадгүй
+      setHasMore((active?.data || []).length >= PAGE)
     } finally {
       setLoading(false)
+    }
+  }
+
+  /** «Цааш үзэх» — дараагийн хуудсыг нэмж татна. */
+  const loadMore = async () => {
+    setLoadingMore(true)
+    try {
+      const skip = orders.filter(o => o.status !== 'deleted').length
+      const { data } = await ordersApi.list({
+        date_from: dateFrom, date_to: dateTo,
+        ...(kind ? { kind } : {}),
+        ...(payMethod ? { payment_method: payMethod } : {}),
+        skip, limit: PAGE,
+      })
+      const rows = data || []
+      setOrders(prev => {
+        const byId = new Map(prev.map(o => [o.id, o]))
+        for (const o of rows) byId.set(o.id, o)
+        return [...byId.values()].sort(
+          (a, b) => new Date(b.created_at) - new Date(a.created_at))
+      })
+      setHasMore(rows.length >= PAGE)
+    } finally {
+      setLoadingMore(false)
     }
   }
 
@@ -130,33 +165,22 @@ export default function HistoryPage() {
 
   const activeOrders  = orders.filter(o => o.status !== 'deleted')
   const deletedOrders = orders.filter(o => o.status === 'deleted')
-  const totalRevenue  = activeOrders.reduce((s, o) => s + o.total, 0)
-  const totalDiscount = activeOrders.reduce((s, o) => s + (o.discount_amount || 0), 0)
-  const deletedTotal  = deletedOrders.reduce((s, o) => s + o.total, 0)
 
-  const unpaidTotal = activeOrders.reduce((s, o) => s + (o.is_paid ? 0 : o.total), 0)
-  const lateTotal   = lateOrders.reduce((s, o) => s + o.total, 0)
+  // Бүх нийлбэрийг СЕРВЕР бүтэн хугацаанд нь бодно. Хуудаслаж татсан
+  // жагсаалтаас бодвол зөвхөн эхний 100 захиалгын дүн гарах байсан.
+  const s = summary
+  const shownCount    = activeOrders.length
+  const activeCount   = s ? s.active_count   : shownCount
+  const totalRevenue  = s ? s.active_total   : 0
+  const totalDiscount = s ? s.discount_total : 0
+  const deletedCount  = s ? s.deleted_count  : deletedOrders.length
+  const deletedTotal  = s ? s.deleted_total  : 0
+  const unpaidTotal   = s ? s.unpaid_total   : 0
+  const lateTotal     = s ? s.late_total     : 0
   // Бодит орлого = тухайн хугацааны төлөгдсөн + нөхөж авсан төлбөр
-  const netRevenue  = totalRevenue - unpaidTotal + lateTotal
+  const netRevenue    = totalRevenue - unpaidTotal + lateTotal
 
-  // Төлбөрийн хэлбэрээр задаргаа — нөхөж авсан төлбөр мөн орно
-  const addPayment = (acc, o) => {
-    if (!o.is_paid) {
-      acc.unpaid = (acc.unpaid || 0) + o.total
-    } else if (o.payment_method === 'mixed' && o.payment_details) {
-      try {
-        Object.entries(JSON.parse(o.payment_details)).forEach(([m, a]) => {
-          acc[m] = (acc[m] || 0) + Number(a)
-        })
-      } catch { /* skip */ }
-    } else if (o.payment_method !== 'mixed') {
-      acc[o.payment_method] = (acc[o.payment_method] || 0) + o.total
-    }
-    return acc
-  }
-  const breakdown = Object.entries(
-    [...activeOrders, ...lateOrders].reduce(addPayment, {})
-  ).filter(([, v]) => v > 0)
+  const breakdown = Object.entries(s?.breakdown || {}).filter(([, v]) => v > 0)
 
   return (
     <div className="flex flex-col h-full bg-gray-50">
@@ -261,7 +285,7 @@ export default function HistoryPage() {
       {!loading && orders.length > 0 && (
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-2.5 shrink-0">
           <div className="flex items-center gap-5 flex-wrap">
-            <Stat label="Захиалга" value={`${activeOrders.length} ш`} white />
+            <Stat label="Захиалга" value={`${activeCount} ш`} white />
             <div className="w-px h-7 bg-white/20" />
             <Stat label="Нийт" value={`${totalRevenue.toLocaleString()}₮`} white />
             {unpaidTotal > 0 && (
@@ -282,10 +306,10 @@ export default function HistoryPage() {
                 <Stat label="Нийт орлого" value={`${netRevenue.toLocaleString()}₮`} green />
               </>
             )}
-            {deletedOrders.length > 0 && (
+            {deletedCount > 0 && (
               <>
                 <div className="w-px h-7 bg-white/20" />
-                <Stat label={`Устгагдсан (${deletedOrders.length})`} value={`${deletedTotal.toLocaleString()}₮`} red />
+                <Stat label={`Устгагдсан (${deletedCount})`} value={`${deletedTotal.toLocaleString()}₮`} red />
               </>
             )}
             {totalDiscount > 0 && (
@@ -373,6 +397,25 @@ export default function HistoryPage() {
                 }}
               />
             ))}
+
+            {/* ── Хуудаслалт ── */}
+            {hasMore ? (
+              <button
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="w-full mt-2 py-3 rounded-xl border border-gray-200 bg-white
+                           text-sm font-semibold text-gray-600 hover:bg-gray-50
+                           disabled:opacity-60 transition-colors"
+              >
+                {loadingMore
+                  ? 'Уншиж байна…'
+                  : `Цааш үзэх — ${shownCount}/${activeCount}`}
+              </button>
+            ) : activeCount > PAGE && (
+              <p className="text-center text-xs text-gray-400 py-3">
+                Бүх {activeCount} захиалга харагдлаа
+              </p>
+            )}
           </div>
         )}
       </div>

@@ -354,9 +354,10 @@ class CouponOut(BaseModel):
 
 # ── User / Auth ────────────────────────────────────────
 class UserRole(str, Enum):
-    admin   = "admin"
-    cashier = "cashier"
-    cleaner = "cleaner"    # Үйлчлэгч (цэвэрлэгээ)
+    admin      = "admin"
+    accountant = "accountant"   # Нягтлан — бүх салбарт хүчинтэй
+    cashier    = "cashier"
+    cleaner    = "cleaner"      # Үйлчлэгч (цэвэрлэгээ)
 
 
 class CashierScope(str, Enum):
@@ -389,6 +390,9 @@ class UserOut(BaseModel):
     username:   str
     full_name:  str
     role:       str
+    # Глобал хэрэглэгч (админ/нягтлан) — бүх салбарт хүчинтэй, салбарын
+    # хэрэглэгчийн цэснээс засах/устгах боломжгүй
+    is_global:  bool = False
     cashier_scope: str = "master"
     is_active:  bool
     created_at: datetime
@@ -409,6 +413,8 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type:   str     = "bearer"
     user:         UserOut
+    branch_code:  str = ""     # аль салбарт нэвтэрсэн
+    branch_name:  str = ""
 
 
 # ── Report ─────────────────────────────────────────────

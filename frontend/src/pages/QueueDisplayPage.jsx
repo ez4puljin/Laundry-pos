@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import axios from 'axios'
 import dayjs from 'dayjs'
 import useBrandStore from '../store/useBrandStore'
+import useBranchStore from '../store/useBranchStore'
 
 /* Хүлээлгийн танхимын ТВ дэлгэц — нэвтрэлтгүй, 5 сек тутам шинэчлэгдэнэ.
    Хувийн мэдээлэл харуулахгүй: зөвхөн дарааллын дугаар, төрөл, өрөөний төлөв.
@@ -23,19 +24,26 @@ export default function QueueDisplayPage() {
   const [clock, setClock] = useState(dayjs())
   const [offline, setOffline] = useState(false)
   const brandName = useBrandStore(s => s.brand_name)
+  const branch    = useBranchStore(s => s.branch)
+
+  // Аль салбарын дараалал вэ. Дэлгэцийг тогтоохын тулд URL-аар ч
+  // өгч болно:  /tv?branch=bayanzurh-salbar
+  const branchCode =
+    new URLSearchParams(window.location.search).get('branch') || branch?.code
 
   useEffect(() => {
     let alive = true
     const load = () => {
       // Interceptor-ийн toast/redirect-ээс зайлсхийж bare axios ашиглана
-      axios.get('/api/public/queue-board')
+      axios.get('/api/public/queue-board',
+                branchCode ? { headers: { 'X-Branch': branchCode } } : undefined)
         .then(r => { if (alive) { setBoard(r.data); setOffline(false) } })
         .catch(() => { if (alive) setOffline(true) })
     }
     load()
     const id = setInterval(load, 5000)
     return () => { alive = false; clearInterval(id) }
-  }, [])
+  }, [branchCode])
 
   useEffect(() => {
     const id = setInterval(() => setClock(dayjs()), 1000)

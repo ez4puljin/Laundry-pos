@@ -23,6 +23,8 @@ from schemas import (
     OrderCreate, OrderItemCreate, OrderOut, OrderStatusUpdate, OrderPayRequest,
     OrderFlagRequest, CouponValidate, CouponOut, CouponCreate
 )
+import settings_store
+import json
 from sms_service import send_ready_sms
 from auth import get_current_user, require_admin
 
@@ -119,26 +121,14 @@ def _clamp_history_range(date_from: Optional[str], date_to: Optional[str], user)
     return date_from, date_to
 
 
-@router.get("/", response_model=List[OrderOut])
-def list_orders(
-    status: Optional[str] = None,
-    kind: Optional[str] = None,          # laundry | shower (хоосон = бүгд)
-    payment_method: Optional[str] = None,  # cash|transfer|card|mixed|points|unpaid
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
-    skip: int = 0,
-    limit: Optional[int] = None,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user),
-):
-    date_from, date_to = _clamp_history_range(date_from, date_to, current_user)
+# Түүх хуудасны нэг хуудсанд буух захиалгын тоо. Хязгааргүй татвал
+# жилийн 22,000 захиалга ~4 секунд болж хөтчийг гацаадаг байсан.
+HISTORY_PAGE_SIZE = 100
+HISTORY_MAX_LIMIT = 500
 
-    q = db.query(Order).options(
-        joinedload(Order.customer),
-        joinedload(Order.items).joinedload(OrderItem.service),
-        joinedload(Order.items).joinedload(OrderItem.product),
-        joinedload(Order.sessions),      # түүх дээр оочирын № харуулна
-    )
+
+def _history_filters(q, *, status, kind, payment_method, date_from, date_to):
+    """Түүхийн шүүлтүүр — жагсаалт ба нийлбэр ижил нөхцөлөөр ажиллана."""
     if status:
         q = q.filter(Order.status == status)
     else:
@@ -158,14 +148,129 @@ def list_orders(
         q = q.filter(Order.created_at >= date_from)
     if date_to:
         q = q.filter(Order.created_at <= date_to + " 23:59:59")
+    return q
+
+
+@router.get("/", response_model=List[OrderOut])
+def list_orders(
+    status: Optional[str] = None,
+    kind: Optional[str] = None,          # laundry | shower (хоосон = бүгд)
+    payment_method: Optional[str] = None,  # cash|transfer|card|mixed|points|unpaid
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    skip: int = 0,
+    limit: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    """Захиалгын жагсаалт — ҮРГЭЛЖ хуудаслана.
+
+    Нийт дүнг эндээс бодохгүй: `/orders/summary` нь SQL дээр бүх хугацааны
+    нийлбэрийг шууд гаргадаг тул хязгааргүй татах шаардлагагүй.
+    """
+    date_from, date_to = _clamp_history_range(date_from, date_to, current_user)
+
+    q = db.query(Order).options(
+        joinedload(Order.customer),
+        joinedload(Order.items).joinedload(OrderItem.service),
+        joinedload(Order.items).joinedload(OrderItem.product),
+        joinedload(Order.sessions),      # түүх дээр оочирын № харуулна
+    )
+    q = _history_filters(q, status=status, kind=kind, payment_method=payment_method,
+                         date_from=date_from, date_to=date_to)
     q = q.order_by(Order.created_at.desc())
-    # limit нь зөвхөн заасан үед хэрэгжинэ — заагаагүй бол хугацааны бүх захиалгыг
-    # буцаана (Түүх хуудасны 7 хоног / сарын нийт орлого зөв тооцоологдоно).
+
+    take = HISTORY_PAGE_SIZE if limit is None else max(1, min(limit, HISTORY_MAX_LIMIT))
     if skip:
         q = q.offset(skip)
-    if limit is not None:
-        q = q.limit(limit)
-    return q.all()
+    return q.limit(take).all()
+
+
+@router.get("/summary")
+def history_summary(
+    kind: Optional[str] = None,
+    payment_method: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    """Түүх хуудасны нийлбэрүүд — бүгд SQL дээр бодогдоно.
+
+    Хэдэн мянган захиалгатай ч хэдхэн миллисекунд, учир нь мөрүүдийг
+    хөтөч рүү татахгүй.
+    """
+    date_from, date_to = _clamp_history_range(date_from, date_to, current_user)
+    F = dict(kind=kind, payment_method=payment_method,
+             date_from=date_from, date_to=date_to)
+
+    def agg(status):
+        row = _history_filters(
+            db.query(func.count(Order.id),
+                     func.coalesce(func.sum(Order.total), 0.0),
+                     func.coalesce(func.sum(Order.discount_amount), 0.0)),
+            status=status, **F).one()
+        return {"count": row[0], "total": float(row[1]), "discount": float(row[2])}
+
+    active  = agg(None)
+    deleted = agg("deleted")
+
+    unpaid_total = float(_history_filters(
+        db.query(func.coalesce(func.sum(Order.total), 0.0)), status=None, **F
+    ).filter(Order.is_paid == False).scalar() or 0.0)
+
+    # ── Төлбөрийн хэлбэрийн задаргаа ──────────────────────
+    breakdown: dict = {}
+    rows = _history_filters(
+        db.query(Order.payment_method, func.coalesce(func.sum(Order.total), 0.0)),
+        status=None, **F
+    ).filter(Order.is_paid == True).group_by(Order.payment_method).all()
+    for method, amount in rows:
+        if method != "mixed":
+            breakdown[method] = breakdown.get(method, 0.0) + float(amount or 0)
+    if unpaid_total:
+        breakdown["unpaid"] = unpaid_total
+
+    # Холимог төлбөрийг задлахад JSON уншина — ийм захиалга цөөн тул
+    # зөвхөн ТЭДГЭЭР мөрийг татна.
+    mixed = _history_filters(
+        db.query(Order.payment_details), status=None, **F
+    ).filter(Order.is_paid == True, Order.payment_method == "mixed").all()
+    for (details,) in mixed:
+        if not details:
+            continue
+        try:
+            for m, a in json.loads(details).items():
+                breakdown[m] = breakdown.get(m, 0.0) + float(a)
+        except (ValueError, TypeError):
+            pass
+
+    # ── Нөхөж авсан төлбөр ────────────────────────────────
+    late_q = db.query(func.count(Order.id),
+                      func.coalesce(func.sum(Order.total), 0.0)).filter(
+        Order.is_paid == True,
+        Order.paid_at.isnot(None),
+        Order.status != "deleted",
+        func.date(Order.paid_at) != func.date(Order.created_at),
+    )
+    if date_from:
+        late_q = late_q.filter(Order.paid_at >= date_from)
+    if date_to:
+        late_q = late_q.filter(Order.paid_at <= date_to + " 23:59:59")
+    late_count, late_total = late_q.one()
+
+    return {
+        "active_count":   active["count"],
+        "active_total":   active["total"],
+        "discount_total": active["discount"],
+        "unpaid_total":   unpaid_total,
+        "deleted_count":  deleted["count"],
+        "deleted_total":  deleted["total"],
+        "late_count":     late_count,
+        "late_total":     float(late_total or 0.0),
+        "breakdown":      breakdown,
+        "page_size":      HISTORY_PAGE_SIZE,
+    }
 
 
 @router.get("/queue", response_model=List[OrderOut])
@@ -493,11 +598,9 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db), current_us
     # 4. Earned points (зөвхөн төлбөр төлсөн үед)
     points_earned = 0
     if not is_unpaid and payload.customer_id:
-        from dotenv import load_dotenv
-        load_dotenv(override=True)
-        import os
-        pts_enabled = os.getenv("POINTS_ENABLED", "true").lower() == "true"
-        pts_rate = float(os.getenv("POINTS_EARN_RATE", "1.0"))
+        # Оноо нь САЛБАРЫН тохиргооноос
+        pts_enabled = settings_store.get_bool(db, "points_enabled")
+        pts_rate = settings_store.get_float(db, "points_earn_rate", 1.0)
         if pts_enabled and pts_rate > 0:
             points_earned = int(total * pts_rate / 100)
 
@@ -692,7 +795,8 @@ def update_order_status(order_id: int, payload: OrderStatusUpdate, db: Session =
         if has_service:
             sms_phone = o.phone or (o.customer.phone if o.customer else None)
             if sms_phone:
-                send_ready_sms(sms_phone, o.order_number)
+                send_ready_sms(sms_phone, o.order_number,
+                               settings_store.sms_config(db))
 
     return db.query(Order).options(
         joinedload(Order.customer),
@@ -743,11 +847,8 @@ def pay_order(
     # Earned points
     points_earned = 0
     if o.customer_id:
-        from dotenv import load_dotenv
-        load_dotenv(override=True)
-        import os
-        pts_enabled = os.getenv("POINTS_ENABLED", "true").lower() == "true"
-        pts_rate = float(os.getenv("POINTS_EARN_RATE", "1.0"))
+        pts_enabled = settings_store.get_bool(db, "points_enabled")
+        pts_rate = settings_store.get_float(db, "points_earn_rate", 1.0)
         if pts_enabled and pts_rate > 0:
             points_earned = int(o.total * pts_rate / 100)
 

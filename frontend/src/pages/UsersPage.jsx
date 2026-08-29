@@ -14,6 +14,8 @@ const ROLE_META = {
   admin:   { label: 'Admin',    Icon: ShieldCheck, badge: 'bg-yellow-100 text-yellow-700 border-yellow-200', pick: 'bg-yellow-50 border-yellow-300 text-yellow-700' },
   cashier: { label: 'Кассчин',  Icon: User,        badge: 'bg-blue-100 text-blue-700 border-blue-200',       pick: 'bg-blue-50 border-blue-300 text-blue-700'       },
   cleaner: { label: 'Үйлчлэгч', Icon: Brush,       badge: 'bg-purple-100 text-purple-700 border-purple-200', pick: 'bg-purple-50 border-purple-300 text-purple-700' },
+  // Нягтлан — бүх салбарт хүчинтэй, «Удирдлага → Салбар»-аас үүсгэнэ
+  accountant: { label: 'Нягтлан', Icon: User, badge: 'bg-emerald-100 text-emerald-700 border-emerald-200', pick: 'bg-emerald-50 border-emerald-300 text-emerald-700' },
 }
 
 const RoleBadge = ({ role }) => {
@@ -171,30 +173,45 @@ export default function UsersPage() {
                   <p className="font-semibold text-gray-900 text-sm truncate">{u.full_name}</p>
                   {u.id === me?.id && <span className="text-[10px] text-blue-500 font-medium">(та)</span>}
                 </div>
-                <div className="flex items-center gap-2 mt-0.5">
+                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                   <span className="font-mono text-gray-400 text-xs">{u.username}</span>
                   <RoleBadge role={u.role} />
                   {u.role === 'cashier' && <ScopeBadge scope={u.cashier_scope} />}
+                  {u.is_global && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full
+                                     bg-indigo-100 text-indigo-700"
+                          title="Бүх салбарт хүчинтэй — «Удирдлага → Салбар»-аас засна">
+                      бүх салбар
+                    </span>
+                  )}
                   {!u.is_active && (
                     <span className="text-[10px] text-red-400 font-medium">Идэвхгүй</span>
                   )}
                 </div>
               </div>
-              {/* Actions */}
+              {/* Actions — бүх салбарын хэрэглэгчийг эндээс засахгүй */}
               <div className="flex items-center gap-0.5 shrink-0">
-                <button onClick={() => openReset(u)}
-                  className="p-2 rounded-lg text-gray-400 hover:bg-orange-50 hover:text-orange-500" title="Нууц үг">
-                  <KeyRound className="w-4 h-4" />
-                </button>
-                <button onClick={() => openEdit(u)}
-                  className="p-2 rounded-lg text-gray-400 hover:bg-blue-50 hover:text-blue-600" title="Засах">
-                  <Pencil className="w-4 h-4" />
-                </button>
-                {u.id !== me?.id && (
-                  <button onClick={() => openDelete(u)}
-                    className="p-2 rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-500" title="Устгах">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                {u.is_global ? (
+                  <span className="text-[11px] text-gray-400 text-right leading-tight px-1">
+                    Удирдлага →<br />Салбар
+                  </span>
+                ) : (
+                  <>
+                    <button onClick={() => openReset(u)}
+                      className="p-2 rounded-lg text-gray-400 hover:bg-orange-50 hover:text-orange-500" title="Нууц үг">
+                      <KeyRound className="w-4 h-4" />
+                    </button>
+                    <button onClick={() => openEdit(u)}
+                      className="p-2 rounded-lg text-gray-400 hover:bg-blue-50 hover:text-blue-600" title="Засах">
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    {u.id !== me?.id && (
+                      <button onClick={() => openDelete(u)}
+                        className="p-2 rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-500" title="Устгах">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             </div>

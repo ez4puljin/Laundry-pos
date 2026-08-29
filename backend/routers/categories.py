@@ -5,7 +5,7 @@ from typing import List
 from database import get_db
 from models import Category, Service
 from schemas import CategoryCreate, CategoryUpdate, CategoryOut
-from auth import get_current_user, require_admin
+from auth import get_current_user, require_bookkeeping
 
 router = APIRouter(prefix="/categories", tags=["categories"])
 
@@ -18,7 +18,7 @@ def list_categories(db: Session = Depends(get_db), _=Depends(get_current_user)):
 
 # POST/PUT/DELETE — зөвхөн админ
 @router.post("/", response_model=CategoryOut)
-def create_category(payload: CategoryCreate, db: Session = Depends(get_db), _=Depends(require_admin)):
+def create_category(payload: CategoryCreate, db: Session = Depends(get_db), _=Depends(require_bookkeeping)):
     existing = db.query(Category).filter(Category.value == payload.value).first()
     if existing:
         raise HTTPException(status_code=400, detail="Ангилалын утга давхцаж байна")
@@ -30,7 +30,7 @@ def create_category(payload: CategoryCreate, db: Session = Depends(get_db), _=De
 
 
 @router.put("/{cat_id}", response_model=CategoryOut)
-def update_category(cat_id: int, payload: CategoryUpdate, db: Session = Depends(get_db), _=Depends(require_admin)):
+def update_category(cat_id: int, payload: CategoryUpdate, db: Session = Depends(get_db), _=Depends(require_bookkeeping)):
     cat = db.query(Category).filter(Category.id == cat_id).first()
     if not cat:
         raise HTTPException(status_code=404, detail="Ангилал олдсонгүй")
@@ -42,7 +42,7 @@ def update_category(cat_id: int, payload: CategoryUpdate, db: Session = Depends(
 
 
 @router.delete("/{cat_id}")
-def delete_category(cat_id: int, db: Session = Depends(get_db), _=Depends(require_admin)):
+def delete_category(cat_id: int, db: Session = Depends(get_db), _=Depends(require_bookkeeping)):
     cat = db.query(Category).filter(Category.id == cat_id).first()
     if not cat:
         raise HTTPException(status_code=404, detail="Ангилал олдсонгүй")

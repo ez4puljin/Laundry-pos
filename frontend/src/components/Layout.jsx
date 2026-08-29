@@ -8,6 +8,8 @@ import useStore     from '../store/useStore'
 import useAuthStore from '../store/useAuthStore'
 import useBrandStore from '../store/useBrandStore'
 import useShiftStore from '../store/useShiftStore'
+import useBranchStore from '../store/useBranchStore'
+import BranchSwitcher from './BranchSwitcher'
 import { canLaundry, canShower } from './ProtectedRoute'
 
 // scope: кассчинд л үйлчилнэ — 'laundry' зөвхөн угаалгын, 'shower' зөвхөн шүршүүрийн
@@ -16,14 +18,17 @@ const ALL_NAV = [
   { to: '/',          label: 'POS Кассчин',  short: 'Касс',      icon: ShoppingCart,    roles: ['admin', 'cashier'] },
   { to: '/queue',     label: 'Дараалал',     short: 'Дараалал',  icon: WashingMachine,  roles: ['admin', 'cashier'], scope: 'laundry' },
   { to: '/rooms',     label: 'Шүршүүр',      short: 'Шүршүүр',   icon: ShowerHead,      roles: ['admin', 'cashier', 'cleaner'], scope: 'shower' },
-  { to: '/history',   label: 'Түүх',         short: 'Түүх',      icon: ClipboardList,   roles: ['admin', 'cashier'] },
-  { to: '/warnings',  label: 'Анхааруулга',  short: 'Анхаар',    icon: AlertTriangle,   roles: ['admin', 'cashier'] },
-  { to: '/customers', label: 'Үйлчлүүлэгч', short: 'Харилцагч', icon: Users,           roles: ['admin', 'cashier'] },
-  { to: '/inventory', label: 'Удирдлага',    short: 'Удирдлага', icon: Settings2,       roles: ['admin'] },
-  { to: '/finance',   label: 'Санхүү',       short: 'Санхүү',    icon: Wallet,          roles: ['admin'] },
-  { to: '/dashboard', label: 'Тайлан',       short: 'Тайлан',    icon: LayoutDashboard, roles: ['admin'] },
+  { to: '/history',   label: 'Түүх',         short: 'Түүх',      icon: ClipboardList,   roles: ['admin', 'cashier', 'accountant'] },
+  { to: '/warnings',  label: 'Анхааруулга',  short: 'Анхаар',    icon: AlertTriangle,   roles: ['admin', 'cashier', 'accountant'] },
+  { to: '/customers', label: 'Үйлчлүүлэгч', short: 'Харилцагч', icon: Users,           roles: ['admin', 'cashier', 'accountant'] },
+  { to: '/inventory', label: 'Удирдлага',    short: 'Удирдлага', icon: Settings2,       roles: ['admin', 'accountant'] },
+  { to: '/finance',   label: 'Санхүү',       short: 'Санхүү',    icon: Wallet,          roles: ['admin', 'accountant'] },
+  { to: '/dashboard', label: 'Тайлан',       short: 'Тайлан',    icon: LayoutDashboard, roles: ['admin', 'accountant'] },
   { to: '/users',     label: 'Хэрэглэгч',   short: 'Хэрэглэгч', icon: UserCog,         roles: ['admin'] },
 ]
+
+// Нягтлан: Санхүү бүрэн, Бараа материал/Үйлчилгээ засах, бусад нь ХАРАХ
+const BOOKKEEPING = ['admin', 'accountant']
 
 export default function Layout({ children }) {
   const itemCount  = useStore(s => s.getItemCount())
@@ -48,6 +53,8 @@ export default function Layout({ children }) {
   const handleLogout = () => {
     useShiftStore.getState().reset()
     logout()
+    // Олон салбартай бол дахин сонгуулна (ганц салбартай бол өөрөө сонгогдоно)
+    useBranchStore.getState().clear()
     navigate('/login', { replace: true })
   }
 
@@ -106,8 +113,11 @@ export default function Layout({ children }) {
           </NavLink>
         ))}
 
-        {/* Spacer + user info + logout */}
+        {/* Spacer + салбар + user info + logout */}
         <div className="mt-auto flex flex-col items-center gap-2 pb-1">
+          {/* Аль салбарт ажиллаж байгаа нь */}
+          <BranchSwitcher compact />
+
           {/* Avatar */}
           <div className="flex flex-col items-center gap-1 w-16">
             <div className="w-9 h-9 bg-blue-700 rounded-full flex items-center justify-center shadow">
@@ -121,6 +131,12 @@ export default function Layout({ children }) {
               <span className="bg-yellow-500/20 text-yellow-400 rounded px-1"
                     style={{ fontSize: '8px' }}>
                 admin
+              </span>
+            )}
+            {role === 'accountant' && (
+              <span className="bg-emerald-500/20 text-emerald-400 rounded px-1"
+                    style={{ fontSize: '8px' }}>
+                нягтлан
               </span>
             )}
           </div>
@@ -165,6 +181,7 @@ export default function Layout({ children }) {
             <WashingMachine className="text-white w-4 h-4" />
           </div>
           <span className="text-white font-bold text-sm tracking-wide truncate">{brandShort}</span>
+          <BranchSwitcher />
           <div className="ml-auto flex items-center gap-2">
             {itemCount > 0 && (
               <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">

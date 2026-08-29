@@ -1,10 +1,11 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { WashingMachine, Loader2, Eye, EyeOff } from 'lucide-react'
+import { WashingMachine, Loader2, Eye, EyeOff, Building2, ChevronLeft } from 'lucide-react'
 import toast from 'react-hot-toast'
 import axios from 'axios'
 import useAuthStore from '../store/useAuthStore'
 import useBrandStore from '../store/useBrandStore'
+import useBranchStore from '../store/useBranchStore'
 import { homeFor } from '../components/ProtectedRoute'
 
 export default function LoginPage() {
@@ -18,6 +19,9 @@ export default function LoginPage() {
   const brandShort = useBrandStore(s => s.brand_short)
   const brandDesc  = useBrandStore(s => s.brand_desc)
   const setAuth  = useAuthStore(s => s.setAuth)
+  const branch      = useBranchStore(s => s.branch)
+  const branchCount = useBranchStore(s => s.branches.length)
+  const clearBranch = useBranchStore(s => s.clear)
 
   const handleLogin = async (e) => {
     e.preventDefault()
@@ -29,8 +33,17 @@ export default function LoginPage() {
       const res = await axios.post('/api/auth/login', {
         username: username.trim(),
         password,
-      })
+      }, branch ? { headers: { 'X-Branch': branch.code } } : undefined)
       setAuth(res.data.user, res.data.access_token)
+      // Сервер аль салбарт нэвтэрснийг баталгаажуулж буцаана
+      if (res.data.branch_code) {
+        useBranchStore.getState().select({
+          id:   branch?.id ?? 0,
+          code: res.data.branch_code,
+          name: res.data.branch_name || branch?.name || '',
+          address: branch?.address ?? null,
+        })
+      }
       toast.success(`Тавтай морил, ${res.data.user.full_name}!`)
       navigate(homeFor(res.data.user.role), { replace: true })
     } catch (err) {
@@ -95,9 +108,37 @@ export default function LoginPage() {
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
 
             <h2 className="text-2xl font-bold text-gray-900 mb-1">Нэвтрэх</h2>
-            <p className="text-gray-400 text-sm mb-7">
+            <p className="text-gray-400 text-sm mb-4">
               Системд нэвтрэхийн тулд мэдээллээ оруулна уу
             </p>
+
+            {/* Аль салбарт нэвтэрч байгаа нь */}
+            {branch && (
+              <div className="flex items-center gap-2.5 mb-6 px-3 py-2.5 rounded-xl
+                              bg-blue-50 border border-blue-100">
+                <Building2 className="w-4 h-4 text-blue-600 shrink-0" />
+                <span className="flex-1 min-w-0">
+                  <span className="block text-sm font-semibold text-blue-900 truncate">
+                    {branch.name}
+                  </span>
+                  {branch.address && (
+                    <span className="block text-xs text-blue-500 truncate">
+                      {branch.address}
+                    </span>
+                  )}
+                </span>
+                {branchCount > 1 && (
+                  <button
+                    type="button"
+                    onClick={clearBranch}
+                    className="shrink-0 flex items-center gap-0.5 text-xs font-medium
+                               text-blue-600 hover:text-blue-800 transition-colors"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" /> Солих
+                  </button>
+                )}
+              </div>
+            )}
 
             <form onSubmit={handleLogin} className="space-y-5">
 

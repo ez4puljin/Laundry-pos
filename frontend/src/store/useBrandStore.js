@@ -3,6 +3,8 @@ import { persist } from 'zustand/middleware'
 import axios from 'axios'
 
 /* Системийн нэр (байгууллагын брэнд).
+   САЛБАР ТУС БҮРД тусдаа — нэвтрэх хуудсанд салбараа сонгоход зүүн талын
+   мэдээлэл тухайн салбарынхаар солигдоно.
    Нэвтрэх хуудас, ТВ дэлгэц ч ашигладаг тул нэвтрэлтгүй endpoint-оос уншина.
    localStorage-д хадгалагдсан тул хуудас дахин ачаалахад анивчихгүй. */
 
@@ -18,10 +20,14 @@ const useBrandStore = create(
       ...DEFAULT_BRAND,
       loaded: false,
 
-      fetchBrand: async () => {
+      /** branchCode — аль салбарын нэрийг татах вэ (сонгоогүй бол анхныхыг) */
+      fetchBrand: async (branchCode) => {
         try {
           // Interceptor-ийн toast/redirect-ээс зайлсхийж bare axios ашиглана
-          const { data } = await axios.get('/api/public/brand')
+          const { data } = await axios.get(
+            '/api/public/brand',
+            branchCode ? { headers: { 'X-Branch': branchCode } } : undefined,
+          )
           set({
             brand_name:  data.brand_name  || DEFAULT_BRAND.brand_name,
             brand_short: data.brand_short || DEFAULT_BRAND.brand_short,

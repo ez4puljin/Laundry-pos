@@ -1,17 +1,26 @@
 import sys
 import io
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends
+from pathlib import Path
+
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from database import engine, SessionLocal
+import central
 import models
 import licensing
 from routers import services, customers, orders, inventory, reports, categories, machines, settings, shifts, rooms, finance
 from routers import license_api
+from routers import branches as branches_router
+from routers import backup as backup_router
 from routers import users as users_router
-from auth import get_current_user, require_admin, hash_password
+from auth import (
+    get_current_user, require_admin, require_bookkeeping,
+    require_report_view, hash_password,
+)
 
 # Windows UTF-8 encoding засах.
 # Аль хэдийн UTF-8 болсон урсгалыг дахин боохгүй — давхар боовол эхний
@@ -32,10 +41,11 @@ if sys.platform == "win32":
     _force_utf8("stderr")
 
 # ── DB үүсгэх ───────────────────────────────────────────
-models.Base.metadata.create_all(bind=engine)
+# Хүснэгт үүсгэх, migration, seed-ийг САЛБАР БҮРД central.ensure_ready
+# гүйцэтгэнэ (доод талд set_hooks-оор бүртгүүлнэ).
 
 
-def _migrate():
+def _migrate(engine=engine):
     """SQLite column migration - шинэ баганууд нэмэх"""
     from sqlalchemy import text, inspect
     inspector = inspect(engine)
@@ -246,6 +256,14 @@ def _migrate():
             """))
             conn.commit()
 
+    # users.is_global — глобал хэрэглэгч (админ/нягтлан) бүх салбарт хүчинтэй
+    usr_cols = [c["name"] for c in inspect(engine).get_columns("users")]
+    if "is_global" not in usr_cols:
+        with engine.connect() as conn:
+            conn.execute(text(
+                "ALTER TABLE users ADD COLUMN is_global BOOLEAN NOT NULL DEFAULT 0"))
+            conn.commit()
+
     # cashier_shifts.scope — кассын төрөл (laundry | shower | master)
     sh_cols = [c["name"] for c in inspect(engine).get_columns("cashier_shifts")]
     if "scope" not in sh_cols:
@@ -383,7 +401,7 @@ def _migrate():
     print("Migration done.")
 
 
-def _seed():
+def _seed(SessionLocal=SessionLocal):
     db = SessionLocal()
     try:
         # Services, inventory-г автомат seed хийхгүй — Удирдлага цэснээс гараар оруулна
@@ -396,6 +414,10 @@ def _seed():
             ]
             for c in cats_data:
                 db.add(models.Category(**c))
+
+        # Салбарын тохиргоо — анх .env-ээс хуулж авна
+        import settings_store
+        settings_store.seed_from_env(db)
 
         db.commit()
         print("Seed check done.")
@@ -466,11 +488,22 @@ def _seed():
         db.close()
 
 
+central.set_hooks(_migrate, _seed)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    _migrate()
-    _seed()
+    # Салбар бүрийн DB-г бэлтгэнэ: create_all → migrate → глобал хэрэглэгч
+    # тааруулах → seed. Шинэ салбар нэмэгдэхэд эхний хандалтдаа бэлтгэгдэнэ.
+    central.bootstrap()
+    for b in central.list_branches(active_only=False):
+        central.ensure_ready(b)
+    central.adopt_admins(central.default_branch())
+    central.sync_all_branches()
+    # Автомат нөөшлөлт — цаг тутам шалгаж, хугацаа болсон бол ZIP үүсгэнэ
+    backup_router.start_auto_backup()
     yield
+    backup_router.stop_auto_backup()
 
 
 app = FastAPI(
@@ -535,6 +568,17 @@ app.add_middleware(
 # Лиценз: нэвтрэлтгүй (түгжигдсэн үед эрх нээх шаардлагатай)
 app.include_router(license_api.router)
 
+# ── Салбар ─────────────────────────────────────────────
+# Нэвтрэлтгүй: салбар сонгох жагсаалт
+app.include_router(branches_router.public_router)
+# Салбарын CRUD (админ), глобал хэрэглэгч (админ), салбар солих
+app.include_router(branches_router.router)
+app.include_router(branches_router.users_router)
+app.include_router(branches_router.auth_router)
+
+# Нөөшлөлт — бүх салбарын өгөгдөл (зөвхөн админ)
+app.include_router(backup_router.router)
+
 # Public: /auth/login, /auth/me  |  Admin: /users/*
 app.include_router(users_router.router)
 
@@ -543,8 +587,8 @@ app.include_router(services.router,   dependencies=[Depends(get_current_user)])
 app.include_router(customers.router,  dependencies=[Depends(get_current_user)])
 app.include_router(orders.router,     dependencies=[Depends(get_current_user)])
 
-# Admin only (reports)
-app.include_router(reports.router,    dependencies=[Depends(require_admin)])
+# Тайлан — админ ба нягтлан
+app.include_router(reports.router,    dependencies=[Depends(require_report_view)])
 # Categories: GET нь бүх user, POST/PUT/DELETE нь admin (router дотроо тодорхойлно)
 app.include_router(categories.router)
 # Inventory: GET нь бүх user, POST/PATCH/DELETE нь admin (router дотроо тодорхойлно)
@@ -567,11 +611,12 @@ app.include_router(rooms.sessions_router, dependencies=[Depends(get_current_user
 # Хүлээлгийн танхимын дэлгэц — нэвтрэлтгүй
 app.include_router(rooms.public_router)
 # Санхүү: зөвхөн админ
-app.include_router(finance.router, dependencies=[Depends(require_admin)])
+app.include_router(finance.router, dependencies=[Depends(require_bookkeeping)])
 
 
-@app.get("/")
-def root():
+@app.get("/health")
+def health():
+    """Серверийн амьд эсэх шалгалт (хяналт, скриптэд)."""
     return {"message": "Laundry POS API is running"}
 
 
@@ -602,6 +647,43 @@ def cleanup_data():
         db.close()
 
 
+# ══════════════════════════════════════════════════════════
+#  Үйлдвэрлэлийн горим — вэб хуудсыг ЭНЭ сервер шууд өгнө
+# ══════════════════════════════════════════════════════════
+#  Ингэснээр Vite dev сервер (node, ~400 MB) ажиллуулах шаардлагагүй:
+#  нэг Python процесс API болон вэбийг хоёуланг үйлчилнэ.
+#
+#  Хөгжүүлэлтэд Vite (5173) нь /api-г устгаад дамжуулдаг. Энд ажиллахад
+#  хөтчөөс /api/... шууд ирэх тул угтварыг өөрсдөө хасна.
+DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+
+
+@app.middleware("http")
+async def strip_api_prefix(request, call_next):
+    path = request.scope.get("path", "")
+    if path.startswith("/api/"):
+        request.scope["path"] = path[4:]
+    elif path == "/api":
+        request.scope["path"] = "/"
+    return await call_next(request)
+
+
+if DIST.is_dir():
+    app.mount("/assets", StaticFiles(directory=DIST / "assets"), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def serve_spa(full_path: str):
+        """React SPA. Файл байвал түүнийг, эс бөгөөс index.html.
+
+        Танигдаагүй зам бүр index.html буцаана — /rooms, /users зэрэг
+        хуудасны нэр API-ийн угтвартай давхцдаг тул угтвараар ялгах
+        боломжгүй. Бүртгэлтэй API замууд эндээс ӨМНӨ таарах тул зөрчилгүй."""
+        candidate = (DIST / full_path).resolve()
+        if full_path and candidate.is_file() and DIST.resolve() in candidate.parents:
+            return FileResponse(candidate)
+        return FileResponse(DIST / "index.html")
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8001)

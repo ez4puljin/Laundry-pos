@@ -9,7 +9,7 @@ from schemas import (
     InventoryCreate, InventoryUpdate, InventoryOut,
     ProductCategoryCreate, ProductCategoryUpdate, ProductCategoryOut,
 )
-from auth import get_current_user, require_admin
+from auth import get_current_user, require_bookkeeping
 
 
 class StockAdjust(BaseModel):
@@ -38,7 +38,7 @@ def list_product_categories(
 def create_product_category(
     payload: ProductCategoryCreate,
     db: Session = Depends(get_db),
-    _: object = Depends(require_admin),
+    _: object = Depends(require_bookkeeping),
 ):
     cat = ProductCategory(**payload.model_dump())
     db.add(cat)
@@ -52,7 +52,7 @@ def update_product_category(
     cat_id: int,
     payload: ProductCategoryUpdate,
     db: Session = Depends(get_db),
-    _: object = Depends(require_admin),
+    _: object = Depends(require_bookkeeping),
 ):
     cat = db.query(ProductCategory).get(cat_id)
     if not cat:
@@ -69,7 +69,7 @@ def update_product_category(
 def delete_product_category(
     cat_id: int,
     db: Session = Depends(get_db),
-    _: object = Depends(require_admin),
+    _: object = Depends(require_bookkeeping),
 ):
     cat = db.query(ProductCategory).get(cat_id)
     if not cat:
@@ -105,7 +105,7 @@ def list_inventory(
 def create_item(
     payload: InventoryCreate,
     db: Session = Depends(get_db),
-    _: object = Depends(require_admin),
+    _: object = Depends(require_bookkeeping),
 ):
     item = InventoryItem(**payload.model_dump())
     db.add(item)
@@ -121,7 +121,7 @@ def adjust_stock(
     item_id: int,
     payload: StockAdjust,
     db: Session = Depends(get_db),
-    _: object = Depends(require_admin),
+    _: object = Depends(require_bookkeeping),
 ):
     """Бараа материалын үлдэгдэл нэмэх/хасах"""
     item = db.query(InventoryItem).filter(InventoryItem.id == item_id).first()
@@ -140,7 +140,7 @@ def update_item(
     item_id: int,
     payload: InventoryUpdate,
     db: Session = Depends(get_db),
-    _: object = Depends(require_admin),
+    _: object = Depends(require_bookkeeping),
 ):
     item = db.query(InventoryItem).filter(InventoryItem.id == item_id).first()
     if not item:
@@ -158,7 +158,7 @@ def update_item(
 def delete_item(
     item_id: int,
     db: Session = Depends(get_db),
-    _: object = Depends(require_admin),
+    _: object = Depends(require_bookkeeping),
 ):
     item = db.query(InventoryItem).filter(InventoryItem.id == item_id).first()
     if not item:

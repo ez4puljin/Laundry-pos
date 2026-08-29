@@ -1,9 +1,12 @@
-import { useState, useEffect, useRef } from 'react'
-import { Plus, Edit2, Trash2, AlertTriangle, ToggleLeft, ToggleRight, Package, Wrench, Tag, Settings, Ticket, MessageSquare, Star, Receipt, ShowerHead, DoorOpen, Save, Eraser, MousePointerClick, Building2 } from 'lucide-react'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { Plus, Edit2, Trash2, AlertTriangle, ToggleLeft, ToggleRight, Package, Wrench, Tag, Settings, Ticket, MessageSquare, Star, Receipt, ShowerHead, DoorOpen, Save, Eraser, MousePointerClick, Building2, UserCog, ShieldCheck, MapPin, KeyRound, X, DatabaseBackup, Download, Upload, RotateCcw, Clock, HardDrive } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { servicesApi, inventoryApi, categoriesApi, machinesApi, ordersApi, settingsApi, roomsApi, roomTypesApi, showerTariffsApi, productCategoriesApi } from '../api/client'
+import dayjs from 'dayjs'
+import { servicesApi, inventoryApi, categoriesApi, machinesApi, ordersApi, settingsApi, roomsApi, roomTypesApi, showerTariffsApi, productCategoriesApi, branchesApi, globalUsersApi, backupApi } from '../api/client'
 import { GRID_COLS, GRID_ROWS } from '../components/RoomMap'
 import useBrandStore from '../store/useBrandStore'
+import useAuthStore from '../store/useAuthStore'
+import useBranchStore from '../store/useBranchStore'
 
 const MACHINE_TYPE_OPTIONS = [
   { value: 'washer',      label: 'Угаалга' },
@@ -64,13 +67,39 @@ const GROUPS = [
       { id: 'brand',   label: 'Байгууллагын нэр', icon: Building2 },
       { id: 'receipt', label: 'Баримт загвар', icon: Receipt },
       { id: 'sms',     label: 'SMS Gateway', icon: MessageSquare },
+      // Салбар ба бүх салбарын хэрэглэгч — ЗӨВХӨН админ
+      { id: 'branches', label: 'Салбар', icon: Building2, adminOnly: true },
+      { id: 'gusers',   label: 'Бүх салбарын хэрэглэгч', icon: UserCog,
+        adminOnly: true },
+      { id: 'backup',   label: 'Нөөшлөлт', icon: DatabaseBackup, adminOnly: true },
     ],
   },
 ]
 
+/* Нягтлан юу засах вэ — Бараа материал ба Үйлчилгээ. Бусад тохиргоо,
+   шүршүүр, салбарын удирдлага нь зөвхөн админд харагдана. */
+const ACCOUNTANT_TABS = ['services', 'categories', 'inventory', 'prodcats']
+
+function visibleGroups(role) {
+  const isAdmin = role === 'admin'
+  return GROUPS
+    .map(g => ({
+      ...g,
+      tabs: g.tabs.filter(x => {
+        if (x.adminOnly && !isAdmin) return false
+        if (!isAdmin && role === 'accountant') return ACCOUNTANT_TABS.includes(x.id)
+        return true
+      }),
+    }))
+    .filter(g => g.tabs.length > 0)
+}
+
 export default function ManagePage() {
-  const [group, setGroup]           = useState('laundry')
-  const [tab, setTab]               = useState('services')
+  const role = useAuthStore(s => s.user?.role)
+  const groups = useMemo(() => visibleGroups(role), [role])
+
+  const [group, setGroup]           = useState(groups[0]?.id || 'laundry')
+  const [tab, setTab]               = useState(groups[0]?.tabs[0]?.id || 'services')
   const [categories, setCategories] = useState([])
 
   const loadCategories = () =>
@@ -78,7 +107,7 @@ export default function ManagePage() {
 
   useEffect(() => { loadCategories() }, [])
 
-  const activeGroup = GROUPS.find(g => g.id === group) || GROUPS[0]
+  const activeGroup = groups.find(g => g.id === group) || groups[0]
 
   // Бүлэг солиход тухайн бүлгийн эхний таб руу шилжинэ
   const pickGroup = (g) => {
@@ -92,7 +121,7 @@ export default function ManagePage() {
       {/* ── 1-р түвшин: бүлэг ── */}
       <div className="bg-white border-b px-3 pt-2.5 shrink-0">
         <div className="flex gap-1.5 overflow-x-auto scrollbar-hide">
-          {GROUPS.map(g => {
+          {groups.map(g => {
             const on = g.id === group
             const Icon = g.icon
             return (
@@ -120,7 +149,7 @@ export default function ManagePage() {
       {/* ── 2-р түвшин: дэд таб ── */}
       <div className="bg-gray-50 border-b px-3 py-2 shrink-0
                       flex gap-1.5 overflow-x-auto scrollbar-hide">
-        {activeGroup.tabs.map(x => (
+        {activeGroup?.tabs.map(x => (
           <TabBtn
             key={x.id}
             active={tab === x.id}
@@ -147,6 +176,9 @@ export default function ManagePage() {
         {tab === 'brand'      && <BrandTab />}
         {tab === 'receipt'    && <ReceiptTab />}
         {tab === 'sms'        && <SmsTab />}
+        {tab === 'branches'   && <BranchesTab />}
+        {tab === 'gusers'     && <GlobalUsersTab />}
+        {tab === 'backup'     && <BackupTab />}
       </div>
     </div>
   )
@@ -2472,3 +2504,636 @@ function SmsTab() {
     </div>
   )
 }
+
+
+// ══════════════════════════════════════════════════════════
+//  Салбар — өгөгдөл нь салбар тус бүрд ТУСДАА хадгалагдана
+// ══════════════════════════════════════════════════════════
+function BranchesTab() {
+  const [rows, setRows]       = useState([])
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy]       = useState(false)
+  const [form, setForm]       = useState(null)   // {id?, name, address, phone}
+  const current = useBranchStore(s => s.branch)
+
+  const load = () => {
+    setLoading(true)
+    branchesApi.list()
+      .then(r => setRows(r.data || []))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }
+  useEffect(() => { load() }, [])
+
+  const save = async () => {
+    const name = (form.name || '').trim()
+    if (!name) return toast.error('Салбарын нэрээ оруулна уу')
+    setBusy(true)
+    try {
+      const body = { name, address: form.address || null, phone: form.phone || null }
+      if (form.id) {
+        await branchesApi.update(form.id, body)
+        toast.success('Салбар шинэчлэгдлээ')
+      } else {
+        await branchesApi.create(body)
+        toast.success('Шинэ салбар үүслээ')
+      }
+      setForm(null)
+      load()
+      useBranchStore.getState().fetchBranches()
+    } catch { /* interceptor toast */ } finally { setBusy(false) }
+  }
+
+  const toggle = async (b) => {
+    try {
+      await branchesApi.update(b.id, { is_active: !b.is_active })
+      load()
+      useBranchStore.getState().fetchBranches()
+    } catch {}
+  }
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h2 className="font-bold text-gray-800">Салбарууд</h2>
+          <p className="text-xs text-gray-400 mt-0.5 max-w-lg">
+            Салбар бүр ӨӨРИЙН өгөгдлийн сантай — захиалга, үйлчлүүлэгч, бараа,
+            кассчид тусдаа. Салбарт нэмсэн хэрэглэгч зөвхөн тэр салбартаа
+            хүчинтэй. Админ, нягтлан бүх салбарт нэвтэрнэ.
+          </p>
+        </div>
+        <button
+          onClick={() => setForm({ name: '', address: '', phone: '' })}
+          className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white
+                     text-sm font-semibold px-3.5 py-2 rounded-xl shrink-0"
+        >
+          <Plus className="w-4 h-4" /> Шинэ салбар
+        </button>
+      </div>
+
+      {loading ? (
+        <p className="text-center text-gray-400 py-6">Уншиж байна...</p>
+      ) : (
+        <div className="space-y-2">
+          {rows.map(b => (
+            <div key={b.id}
+                 className={`flex items-center gap-3 rounded-xl border p-3
+                   ${b.is_active ? 'bg-white border-gray-200' : 'bg-gray-50 border-gray-200 opacity-70'}`}>
+              <span className="w-10 h-10 rounded-xl bg-blue-50 flex items-center
+                               justify-center shrink-0">
+                <Building2 className="w-5 h-5 text-blue-600" />
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold text-gray-800 truncate">{b.name}</span>
+                  {current?.code === b.code && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full
+                                     bg-blue-100 text-blue-700">одоо энд</span>
+                  )}
+                  {!b.is_active && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full
+                                     bg-gray-200 text-gray-500">хаалттай</span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400 truncate">
+                  {[b.address, b.phone].filter(Boolean).join(' · ') || '—'}
+                </p>
+              </div>
+              <button onClick={() => setForm({ id: b.id, name: b.name,
+                                              address: b.address || '', phone: b.phone || '' })}
+                      className="p-2 rounded-lg hover:bg-gray-100 text-gray-500" title="Засах">
+                <Edit2 className="w-4 h-4" />
+              </button>
+              <button onClick={() => toggle(b)}
+                      className="p-2 rounded-lg hover:bg-gray-100 shrink-0"
+                      title={b.is_active ? 'Хаах' : 'Нээх'}>
+                {b.is_active
+                  ? <ToggleRight className="w-5 h-5 text-green-600" />
+                  : <ToggleLeft  className="w-5 h-5 text-gray-400" />}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p className="text-xs text-gray-400 flex items-start gap-1.5">
+        <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+        Салбарыг хаахад өгөгдөл нь устахгүй — файлдаа бүтэн хадгалагдана.
+      </p>
+
+      {form && (
+        <Modal
+          title={form.id ? 'Салбар засах' : 'Шинэ салбар'}
+          onClose={() => setForm(null)}
+          onSubmit={save}
+          submitLabel={busy ? 'Хадгалж байна…' : 'Хадгалах'}
+        >
+          <Field label="Салбарын нэр">
+            <TextInput value={form.name} autoFocus placeholder="Баянзүрх салбар"
+                       onChange={v => setForm({ ...form, name: v })} />
+          </Field>
+          <Field label="Хаяг">
+            <TextInput value={form.address} placeholder="Заавал биш"
+                       onChange={v => setForm({ ...form, address: v })} />
+          </Field>
+          <Field label="Утас">
+            <TextInput value={form.phone} placeholder="Заавал биш"
+                       onChange={v => setForm({ ...form, phone: v })} />
+          </Field>
+          {!form.id && (
+            <p className="text-xs text-gray-400">
+              Шинэ салбар ХООСОН өгөгдлийн сантай үүснэ. Үйлчилгээ, бараа,
+              кассчдаа тэр салбар руу нэвтэрч нэмнэ.
+            </p>
+          )}
+        </Modal>
+      )}
+    </div>
+  )
+}
+
+
+// ══════════════════════════════════════════════════════════
+//  Бүх салбарын хэрэглэгч — админ ба нягтлан
+// ══════════════════════════════════════════════════════════
+const GLOBAL_ROLE_LABEL = { admin: 'Админ', accountant: 'Нягтлан' }
+
+function GlobalUsersTab() {
+  const [rows, setRows]       = useState([])
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy]       = useState(false)
+  const [form, setForm]       = useState(null)
+  const me = useAuthStore(s => s.user)
+
+  const load = () => {
+    setLoading(true)
+    globalUsersApi.list()
+      .then(r => setRows(r.data || []))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }
+  useEffect(() => { load() }, [])
+
+  const save = async () => {
+    const username = (form.username || '').trim()
+    if (!form.id && (!username || !form.password)) {
+      return toast.error('Нэвтрэх нэр, нууц үгээ оруулна уу')
+    }
+    setBusy(true)
+    try {
+      if (form.id) {
+        await globalUsersApi.update(form.id, {
+          full_name: form.full_name, role: form.role,
+          ...(form.password ? { password: form.password } : {}),
+        })
+        toast.success('Шинэчлэгдлээ')
+      } else {
+        await globalUsersApi.create({
+          username, full_name: form.full_name || username,
+          password: form.password, role: form.role,
+        })
+        toast.success('Хэрэглэгч бүх салбарт нэмэгдлээ')
+      }
+      setForm(null)
+      load()
+    } catch { /* interceptor toast */ } finally { setBusy(false) }
+  }
+
+  const remove = async (u) => {
+    if (!confirm(`«${u.full_name}»-г бүх салбараас устгах уу?`)) return
+    try {
+      await globalUsersApi.remove(u.id)
+      toast.success('Устгалаа')
+      load()
+    } catch {}
+  }
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h2 className="font-bold text-gray-800">Бүх салбарын хэрэглэгч</h2>
+          <p className="text-xs text-gray-400 mt-0.5 max-w-lg">
+            Эдгээр хэрэглэгч НЭГ бүртгэлээр бүх салбарт нэвтэрч, програм дотроос
+            салбар сольж чадна. Кассчин, үйлчлэгчийг «Хэрэглэгч» цэснээс тухайн
+            салбарт нь нэмнэ.
+          </p>
+        </div>
+        <button
+          onClick={() => setForm({ username: '', full_name: '', password: '',
+                                   role: 'accountant' })}
+          className="flex items-center gap-1.5 bg-slate-700 hover:bg-slate-800 text-white
+                     text-sm font-semibold px-3.5 py-2 rounded-xl shrink-0"
+        >
+          <Plus className="w-4 h-4" /> Нэмэх
+        </button>
+      </div>
+
+      {loading ? (
+        <p className="text-center text-gray-400 py-6">Уншиж байна...</p>
+      ) : (
+        <div className="space-y-2">
+          {rows.map(u => (
+            <div key={u.id} className="flex items-center gap-3 rounded-xl border
+                                       border-gray-200 bg-white p-3">
+              <span className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0
+                ${u.role === 'admin' ? 'bg-amber-50' : 'bg-emerald-50'}`}>
+                {u.role === 'admin'
+                  ? <ShieldCheck className="w-5 h-5 text-amber-600" />
+                  : <UserCog className="w-5 h-5 text-emerald-600" />}
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold text-gray-800 truncate">{u.full_name}</span>
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full
+                    ${u.role === 'admin'
+                      ? 'bg-amber-100 text-amber-700'
+                      : 'bg-emerald-100 text-emerald-700'}`}>
+                    {GLOBAL_ROLE_LABEL[u.role] || u.role}
+                  </span>
+                  {u.username === me?.username && (
+                    <span className="text-[10px] text-gray-400">(та)</span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400 truncate">{u.username}</p>
+              </div>
+              <button onClick={() => setForm({ id: u.id, username: u.username,
+                                               full_name: u.full_name, role: u.role,
+                                               password: '' })}
+                      className="p-2 rounded-lg hover:bg-gray-100 text-gray-500" title="Засах">
+                <Edit2 className="w-4 h-4" />
+              </button>
+              {u.username !== me?.username && (
+                <button onClick={() => remove(u)}
+                        className="p-2 rounded-lg hover:bg-red-50 text-red-500" title="Устгах">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {form && (
+        <Modal
+          title={form.id ? 'Хэрэглэгч засах' : 'Бүх салбарын хэрэглэгч'}
+          onClose={() => setForm(null)}
+          onSubmit={save}
+          submitLabel={busy ? 'Хадгалж байна…' : 'Хадгалах'}
+        >
+          {!form.id && (
+            <Field label="Нэвтрэх нэр">
+              <TextInput value={form.username} autoFocus placeholder="nyagtlan"
+                         onChange={v => setForm({ ...form, username: v })} />
+            </Field>
+          )}
+          <Field label="Бүтэн нэр">
+            <TextInput value={form.full_name} placeholder="Овог Нэр"
+                       onChange={v => setForm({ ...form, full_name: v })} />
+          </Field>
+          <Field label="Эрх">
+            <select value={form.role}
+                    onChange={e => setForm({ ...form, role: e.target.value })}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2
+                               text-sm bg-gray-50">
+              <option value="accountant">Нягтлан — санхүү, бараа, үйлчилгээ</option>
+              <option value="admin">Админ — бүрэн эрх</option>
+            </select>
+          </Field>
+          <Field label={form.id ? 'Шинэ нууц үг (хоосон бол хэвээр)' : 'Нууц үг'}>
+            <TextInput value={form.password} type="password" placeholder="••••••••"
+                       onChange={v => setForm({ ...form, password: v })} />
+          </Field>
+        </Modal>
+      )}
+    </div>
+  )
+}
+
+
+/* Салбарын цонхнуудын энгийн текст оролт */
+function TextInput({ value, onChange, placeholder, type = 'text', autoFocus }) {
+  return (
+    <input
+      type={type}
+      value={value || ''}
+      autoFocus={autoFocus}
+      onChange={e => onChange(e.target.value)}
+      placeholder={placeholder}
+      className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50
+                 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white"
+    />
+  )
+}
+
+
+// ══════════════════════════════════════════════════════════
+//  Нөөшлөлт — бүх салбарын өгөгдлийг нэг ZIP файлд
+// ══════════════════════════════════════════════════════════
+const RESTORE_WORD = 'СЭРГЭЭХ'
+
+const fmtSize = (b) => b >= 1048576
+  ? `${(b / 1048576).toFixed(1)} MB`
+  : `${Math.max(1, Math.round(b / 1024))} KB`
+
+const fmtAge = (h) => {
+  if (h == null) return 'нөөцлөөгүй байна'
+  if (h < 1)  return `${Math.max(1, Math.round(h * 60))} минутын өмнө`
+  if (h < 48) return `${Math.round(h)} цагийн өмнө`
+  return `${Math.round(h / 24)} хоногийн өмнө`
+}
+
+function BackupTab() {
+  const [data, setData]       = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy]       = useState(false)
+  const [note, setNote]       = useState('')
+  const [restore, setRestore] = useState(null)   // {name} эсвэл {file}
+  const [confirm, setConfirm] = useState('')
+  const fileRef = useRef(null)
+
+  const load = () => {
+    setLoading(true)
+    backupApi.list()
+      .then(r => setData(r.data))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }
+  useEffect(() => { load() }, [])
+
+  const conf = data?.config || {}
+
+  const saveConf = async (patch) => {
+    try {
+      await backupApi.config({ ...conf, ...patch })
+      load()
+    } catch { /* interceptor toast */ }
+  }
+
+  const doCreate = async () => {
+    setBusy(true)
+    const id = toast.loading('Нөөцлөж байна…')
+    try {
+      const { data: bk } = await backupApi.create(note)
+      toast.success(`Нөөц үүслээ — ${fmtSize(bk.bytes)}`, { id })
+      setNote('')
+      load()
+    } catch {
+      toast.dismiss(id)
+    } finally { setBusy(false) }
+  }
+
+  const doDownload = async (name) => {
+    const id = toast.loading('Татаж байна…')
+    try {
+      const { data: blob } = await backupApi.download(name)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = name
+      document.body.appendChild(a); a.click(); a.remove()
+      URL.revokeObjectURL(url)
+      toast.success('Татагдлаа', { id })
+    } catch { toast.dismiss(id) }
+  }
+
+  const doDelete = async (name) => {
+    if (!confirm2(`«${name}» нөөцийг устгах уу?`)) return
+    try {
+      await backupApi.remove(name)
+      toast.success('Устлаа')
+      load()
+    } catch {}
+  }
+
+  const doRestore = async () => {
+    setBusy(true)
+    const id = toast.loading('Сэргээж байна…')
+    try {
+      await backupApi.restore({ ...restore, confirm })
+      toast.success('Сэргээгдлээ. Хуудас дахин ачаална.', { id, duration: 4000 })
+      setRestore(null); setConfirm('')
+      setTimeout(() => window.location.reload(), 1500)
+    } catch {
+      toast.dismiss(id)
+    } finally { setBusy(false) }
+  }
+
+  const pickFile = (e) => {
+    const f = e.target.files?.[0]
+    if (f) { setRestore({ file: f }); setConfirm('') }
+    e.target.value = ''
+  }
+
+  return (
+    <div className="p-4 space-y-4">
+      <div>
+        <h2 className="font-bold text-gray-800">Нөөшлөлт</h2>
+        <p className="text-xs text-gray-400 mt-0.5 max-w-2xl">
+          БҮХ салбарын өгөгдлийг (захиалга, үйлчлүүлэгч, бараа, ээлж, тохиргоо)
+          нэг ZIP файлд хуулна. Сервер ажиллаж байхад ч аюулгүй — өгөгдлийн
+          сангийн албан ёсны хуулбарлах аргыг ашиглана.
+        </p>
+      </div>
+
+      {/* Одоогийн байдал */}
+      <div className="grid sm:grid-cols-3 gap-3">
+        <div className="bg-blue-50 rounded-xl p-3">
+          <p className="text-xs text-blue-600">Сүүлийн нөөц</p>
+          <p className="font-bold text-blue-800 mt-0.5">{fmtAge(data?.last_age_hours)}</p>
+        </div>
+        <div className="bg-gray-50 rounded-xl p-3">
+          <p className="text-xs text-gray-500">Хадгалагдсан</p>
+          <p className="font-bold text-gray-800 mt-0.5">
+            {data?.backups?.length ?? 0} ширхэг
+          </p>
+        </div>
+        <div className="bg-emerald-50 rounded-xl p-3">
+          <p className="text-xs text-emerald-600">Автомат</p>
+          <p className="font-bold text-emerald-800 mt-0.5">
+            {conf.auto_enabled ? `${conf.interval_hours} цаг тутам` : 'унтраалттай'}
+          </p>
+        </div>
+      </div>
+
+      {/* Гараар нөөцлөх */}
+      <div className="rounded-xl border border-gray-200 p-3 space-y-2.5">
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            placeholder="Тэмдэглэл (заавал биш) — жишээ: «Үнэ өөрчлөхийн өмнө»"
+            className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50
+                       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white"
+          />
+          <button onClick={doCreate} disabled={busy}
+            className="flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700
+                       disabled:opacity-60 text-white text-sm font-semibold
+                       px-4 py-2 rounded-xl shrink-0">
+            <DatabaseBackup className="w-4 h-4" /> Одоо нөөцлөх
+          </button>
+        </div>
+
+        {/* Автомат тохиргоо */}
+        <div className="flex items-center gap-3 flex-wrap text-sm pt-1 border-t border-gray-100">
+          <button onClick={() => saveConf({ auto_enabled: !conf.auto_enabled })}
+                  className="flex items-center gap-1.5 text-gray-600">
+            {conf.auto_enabled
+              ? <ToggleRight className="w-5 h-5 text-green-600" />
+              : <ToggleLeft className="w-5 h-5 text-gray-400" />}
+            Автомат нөөшлөлт
+          </button>
+          <label className="flex items-center gap-1.5 text-gray-500">
+            <Clock className="w-3.5 h-3.5" />
+            <select value={conf.interval_hours ?? 24} disabled={!conf.auto_enabled}
+                    onChange={e => saveConf({ interval_hours: Number(e.target.value) })}
+                    className="border border-gray-200 rounded-lg px-2 py-1 text-xs bg-gray-50">
+              <option value={6}>6 цаг тутам</option>
+              <option value={12}>12 цаг тутам</option>
+              <option value={24}>Өдөр бүр</option>
+              <option value={168}>7 хоног тутам</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-1.5 text-gray-500">
+            <HardDrive className="w-3.5 h-3.5" />
+            <select value={conf.keep ?? 14}
+                    onChange={e => saveConf({ keep: Number(e.target.value) })}
+                    className="border border-gray-200 rounded-lg px-2 py-1 text-xs bg-gray-50">
+              <option value={7}>7 хадгална</option>
+              <option value={14}>14 хадгална</option>
+              <option value={30}>30 хадгална</option>
+              <option value={90}>90 хадгална</option>
+            </select>
+          </label>
+          <button onClick={() => fileRef.current?.click()}
+            className="ml-auto flex items-center gap-1.5 text-xs font-medium text-gray-500
+                       hover:text-gray-700">
+            <Upload className="w-3.5 h-3.5" /> Файлаас сэргээх
+          </button>
+          <input ref={fileRef} type="file" accept=".zip" hidden onChange={pickFile} />
+        </div>
+      </div>
+
+      {/* Жагсаалт */}
+      {loading ? (
+        <p className="text-center text-gray-400 py-6">Уншиж байна...</p>
+      ) : !data?.backups?.length ? (
+        <p className="text-center text-gray-400 py-6">Нөөц байхгүй байна</p>
+      ) : (
+        <div className="space-y-2">
+          {data.backups.map(bk => (
+            <div key={bk.name}
+                 className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-3">
+              <span className="w-10 h-10 rounded-xl bg-blue-50 flex items-center
+                               justify-center shrink-0">
+                <DatabaseBackup className="w-5 h-5 text-blue-600" />
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold text-gray-800 text-sm">
+                    {dayjs(bk.created_at).format('YYYY/MM/DD HH:mm')}
+                  </span>
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full
+                                   bg-gray-100 text-gray-500">
+                    {fmtSize(bk.bytes)}
+                  </span>
+                  {bk.broken && (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full
+                                     bg-red-100 text-red-600">эвдэрсэн</span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400 truncate">
+                  {bk.note ? `${bk.note} · ` : ''}
+                  {bk.branches?.length
+                    ? bk.branches.map(x => `${x.name} (${x.orders})`).join(', ')
+                    : bk.name}
+                </p>
+              </div>
+              <button onClick={() => doDownload(bk.name)}
+                      className="p-2 rounded-lg hover:bg-gray-100 text-gray-500" title="Татах">
+                <Download className="w-4 h-4" />
+              </button>
+              <button onClick={() => { setRestore({ name: bk.name }); setConfirm('') }}
+                      disabled={bk.broken}
+                      className="p-2 rounded-lg hover:bg-amber-50 text-amber-600
+                                 disabled:opacity-30" title="Энэ нөөцөөс сэргээх">
+                <RotateCcw className="w-4 h-4" />
+              </button>
+              <button onClick={() => doDelete(bk.name)}
+                      className="p-2 rounded-lg hover:bg-red-50 text-red-500" title="Устгах">
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p className="text-xs text-gray-400 flex items-start gap-1.5">
+        <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+        Нөөц нь <b className="font-semibold">{data?.dir || 'backend/backups'}</b> хавтаст
+        хадгалагдана. Компьютер эвдэрвэл хамт алдагдана — чухал нөөцөө татаж аваад
+        USB эсвэл өөр газар хуулж байхыг зөвлөе.
+      </p>
+
+      {/* Сэргээх баталгаа */}
+      {restore && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+             onClick={() => setRestore(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="bg-gradient-to-r from-amber-500 to-orange-500 px-5 py-4
+                            text-white rounded-t-2xl">
+              <h3 className="font-bold flex items-center gap-2">
+                <RotateCcw className="w-5 h-5" /> Нөөцөөс сэргээх
+              </h3>
+            </div>
+            <div className="p-5 space-y-3">
+              <p className="text-sm text-gray-600">
+                <b className="text-gray-900">
+                  {restore.name || restore.file?.name}
+                </b>{' '}
+                нөөцөөс сэргээх гэж байна.
+              </p>
+              <div className="rounded-xl bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+                <b>Анхаар:</b> БҮХ салбарын одоогийн өгөгдөл нөөц дэх өгөгдлөөр
+                солигдоно. Нөөц авсны дараах бүх захиалга, өөрчлөлт устана.
+                <br />
+                <span className="text-red-600/80 text-xs">
+                  Сэргээхийн өмнө одоогийн байдлын нөөц автоматаар үүснэ.
+                </span>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">
+                  Баталгаажуулахын тулд «{RESTORE_WORD}» гэж бичнэ үү
+                </label>
+                <input
+                  value={confirm}
+                  onChange={e => setConfirm(e.target.value)}
+                  placeholder={RESTORE_WORD}
+                  autoFocus
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50
+                             focus:outline-none focus:ring-2 focus:ring-red-400 focus:bg-white"
+                />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button onClick={() => setRestore(null)}
+                  className="flex-1 border border-gray-300 rounded-xl py-2.5 text-sm
+                             font-medium text-gray-600 hover:bg-gray-100">
+                  Болих
+                </button>
+                <button onClick={doRestore}
+                  disabled={busy || confirm.trim().toUpperCase() !== RESTORE_WORD}
+                  className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-40
+                             text-white rounded-xl py-2.5 text-sm font-bold">
+                  {busy ? 'Сэргээж байна…' : 'Сэргээх'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* window.confirm-ийг нэрийн зөрчилгүйгээр дуудна */
+const confirm2 = (msg) => window.confirm(msg)

@@ -227,7 +227,11 @@ class User(Base):
     username      = Column(String(50), unique=True, index=True, nullable=False)
     full_name     = Column(String(100), nullable=False)
     password_hash = Column(String(255), nullable=False)
-    role          = Column(String(20), default="cashier", nullable=False)   # "admin" | "cashier" | "cleaner"
+    # "admin" | "accountant" | "cashier" | "cleaner"
+    role          = Column(String(20), default="cashier", nullable=False)
+    # Глобал хэрэглэгч (админ/нягтлан) — central.db-ээс хуулбарлагдсан, БҮХ
+    # салбарт хүчинтэй. Салбарын дотоод цэснээс засах/устгах боломжгүй.
+    is_global     = Column(Boolean, default=False, nullable=False)
     # Кассын ажлын хүрээ: laundry (зөвхөн угаалга) | shower (зөвхөн шүршүүр) | master (хоёулаа)
     cashier_scope = Column(String(20), default="master", nullable=False)
     is_active     = Column(Boolean, default=True, nullable=False)
@@ -248,6 +252,16 @@ class CashierShift(Base):
     status          = Column(String(20), default="active")  # active | ended
 
     user            = relationship("User")
+
+
+# ── AppSetting (Салбарын тохиргоо) ─────────────────────
+#  Байгууллагын нэр, баримтын загвар, оноо, SMS — САЛБАР тус бүрд
+#  тусдаа. Өмнө нь .env файлд глобалаар байсныг энд шилжүүлэв.
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+
+    key   = Column(String(60), primary_key=True, index=True)
+    value = Column(Text, nullable=True)
 
 
 # ── Coupon (Купон) ─────────────────────────────────────

@@ -1,8 +1,14 @@
 import { Navigate } from 'react-router-dom'
 import useAuthStore from '../store/useAuthStore'
 
-/** Role бүрийн үндсэн хуудас — үйлчлэгч зөвхөн Шүршүүр хуудсыг хардаг */
-export const homeFor = (role) => (role === 'cleaner' ? '/rooms' : '/')
+/** Role бүрийн үндсэн хуудас
+ *   · үйлчлэгч  — зөвхөн Шүршүүр
+ *   · нягтлан   — POS ажиллуулахгүй тул Тайлангаас эхэлнэ  */
+export const homeFor = (role) => {
+  if (role === 'cleaner')    return '/rooms'
+  if (role === 'accountant') return '/dashboard'
+  return '/'
+}
 
 /** Кассын ажлын хүрээ. Админ болон бусад role-д 'master' (бүгд харагдана). */
 export const scopeOf = (user) =>

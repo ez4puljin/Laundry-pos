@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from typing import List
 
-from database import get_db
+from database import central_branch, get_db
 import models
 import schemas
 from auth import get_current_user, require_admin, hash_password, verify_password, create_access_token
@@ -12,7 +12,8 @@ router = APIRouter()
 
 # ── Login ────────────────────────────────────────────────────────────────────
 @router.post("/auth/login", response_model=schemas.TokenResponse)
-def login(payload: schemas.LoginRequest, db: Session = Depends(get_db)):
+def login(payload: schemas.LoginRequest, request: Request,
+          db: Session = Depends(get_db)):
     user = db.query(models.User).filter(
         models.User.username == payload.username,
         models.User.is_active == True,
@@ -26,10 +27,15 @@ def login(payload: schemas.LoginRequest, db: Session = Depends(get_db)):
     # өөрөө эхэлнэ (GET /shifts/my → POST /shifts/start). Өөр касс ижил
     # төрөл дээр ажиллаж байвал нэвтрэхийг хориглохгүй — дэлгэц дээр хэн
     # ажиллаж байгааг харуулж, ажиллуулахгүй болгоно.
-    token = create_access_token(user.id, user.role)
+    # Аль салбарын DB-д нэвтэрснийг токенд шингээнэ. Глобал хэрэглэгч
+    # (админ/нягтлан) салбар бүрд хуулбартай тул аль ч салбарт нэвтэрнэ.
+    branch = central_branch(request)
+    token = create_access_token(user.id, user.role, branch.code)
     return schemas.TokenResponse(
         access_token=token,
         user=schemas.UserOut.model_validate(user),
+        branch_code=branch.code,
+        branch_name=branch.name,
     )
 
 
@@ -59,6 +65,12 @@ def create_user(
             status_code=400,
             detail="Энэ нэвтрэх нэр аль хэдийн бүртгэлтэй байна",
         )
+    # Нягтлан нь БҮХ салбарын хэрэглэгч — «Салбар» цэснээс үүсгэнэ
+    if payload.role == schemas.UserRole.accountant:
+        raise HTTPException(
+            status_code=400,
+            detail="Нягтланг «Салбар» цэснээс, бүх салбарын хэрэглэгчээр үүсгэнэ",
+        )
     user = models.User(
         username      = payload.username,
         full_name     = payload.full_name,
@@ -73,6 +85,19 @@ def create_user(
     return user
 
 
+def _deny_global(user: models.User) -> None:
+    """Глобал хэрэглэгчийг (админ/нягтлан) салбарын цэснээс засахыг хориглоно.
+
+    Тэдгээр нь central.db-д хадгалагдаж, салбар бүрд хуулбарлагддаг тул
+    энд засвал дараагийн тааруулалтад дарагдана. «Салбар» цэснээс засна.
+    """
+    if user.is_global:
+        raise HTTPException(
+            status_code=400,
+            detail="Бүх салбарын хэрэглэгчийг «Салбар» цэснээс засна",
+        )
+
+
 @router.put("/users/{user_id}", response_model=schemas.UserOut)
 def update_user(
     user_id: int,
@@ -83,6 +108,7 @@ def update_user(
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Хэрэглэгч олдсонгүй")
+    _deny_global(user)
     # prevent admin from downgrading their own role
     if user_id == admin.id and payload.role is not None and payload.role != "admin":
         raise HTTPException(status_code=400, detail="Өөрийнхөө эрхийг өөрчлөх боломжгүй")
@@ -109,6 +135,7 @@ def reset_password(
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Хэрэглэгч олдсонгүй")
+    _deny_global(user)
     if len(payload.new_password) < 4:
         raise HTTPException(
             status_code=400,
@@ -130,6 +157,7 @@ def delete_user(
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Хэрэглэгч олдсонгүй")
+    _deny_global(user)
     db.delete(user)
     db.commit()
     return {"ok": True}

@@ -6,13 +6,22 @@ const api = axios.create({
   timeout: 10000,
 })
 
-// ── Request: attach Bearer token ────────────────────────
+// ── Request: Bearer токен + сонгосон салбар ─────────────
+// Токен дотор ч салбар байдаг (сервер түүнийг эрхэмлэнэ). X-Branch нь
+// НЭВТРЭЭГҮЙ хандалтад (нэвтрэх хуудас, ТВ дэлгэц) хэрэгтэй.
 api.interceptors.request.use((config) => {
   try {
     const stored = JSON.parse(localStorage.getItem('cemby-auth') || '{}')
     const token  = stored?.state?.token
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
+    }
+  } catch (_) {}
+  try {
+    const br = JSON.parse(localStorage.getItem('cemby-branch') || '{}')
+    const code = br?.state?.branch?.code
+    if (code) {
+      config.headers['X-Branch'] = code
     }
   } catch (_) {}
   return config
@@ -87,6 +96,7 @@ export const customersApi = {
 // ── Orders ──────────────────────────────────────────────
 export const ordersApi = {
   list:           (params = {}) => api.get('/orders/', { params }),
+  summary:        (params = {}) => api.get('/orders/summary', { params }),
   queue:          ()            => api.get('/orders/queue'),
   get:            (id)          => api.get(`/orders/${id}`),
   create:         (data)        => api.post('/orders/', data),
@@ -235,6 +245,49 @@ export const settingsApi = {
   updatePoints: (data) => api.put('/settings/points', data),
   getReceipt:    ()     => api.get('/settings/receipt'),
   updateReceipt: (data) => api.put('/settings/receipt', data),
+}
+
+// ── Нөөшлөлт (зөвхөн админ) ───────────────────────────────
+export const backupApi = {
+  list:   ()      => api.get('/backup/'),
+  config: (data)  => api.put('/backup/config', data),
+  create: (note)  => {
+    const fd = new FormData()
+    fd.append('note', note || '')
+    // Нөөц үүсгэхэд хэдэн арван секунд болж болно
+    return api.post('/backup/create', fd, { timeout: 300000 })
+  },
+  remove: (name)  => api.delete(`/backup/${encodeURIComponent(name)}`),
+  // Татах нь хөтчөөр шууд — токеныг query-гээр дамжуулахгүй тул blob авна
+  download: (name) => api.get(`/backup/download/${encodeURIComponent(name)}`,
+                              { responseType: 'blob', timeout: 300000 }),
+  restore: ({ name, file, confirm }) => {
+    const fd = new FormData()
+    fd.append('confirm', confirm)
+    if (name) fd.append('name', name)
+    if (file) fd.append('file', file)
+    return api.post('/backup/restore', fd, { timeout: 600000 })
+  },
+}
+
+// ── Салбар ────────────────────────────────────────────────
+export const branchesApi = {
+  // Нэвтрэлтгүй — салбар сонгох дэлгэц
+  publicList: ()          => api.get('/public/branches'),
+  list:       ()          => api.get('/branches/'),
+  create:     (data)      => api.post('/branches/', data),
+  update:     (id, data)  => api.put(`/branches/${id}`, data),
+  remove:     (id)        => api.delete(`/branches/${id}`),
+  mine:       ()          => api.get('/auth/my-branches'),
+  switch:     (code)      => api.post('/auth/switch-branch', { branch_code: code }),
+}
+
+// Бүх салбарт хүчинтэй хэрэглэгч (админ, нягтлан)
+export const globalUsersApi = {
+  list:   ()         => api.get('/global-users/'),
+  create: (data)     => api.post('/global-users/', data),
+  update: (id, data) => api.put(`/global-users/${id}`, data),
+  remove: (id)       => api.delete(`/global-users/${id}`),
 }
 
 // ── Shifts ────────────────────────────────────────────────

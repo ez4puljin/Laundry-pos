@@ -63,3 +63,7 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Nooshloltiin ZIP faeluud
+backups/
+backend/backups/
