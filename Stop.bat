@@ -16,4 +16,4 @@ for /f "tokens=5" %%a in ('netstat -aon ^| find ":19002" ^| find "LISTENING"') d
 
 echo.
 echo Laundry POS stopped!
-timeout /t 2 >nul
+ping -n 3 127.0.0.1 >nul

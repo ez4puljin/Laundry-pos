@@ -17,12 +17,18 @@ echo ================================================
 echo.
 echo Ene skript daraahyg avtomataar suulgana:
 echo   - Python + Node.js ^(baihgui bol ooroo tataj suulgana^)
-echo   - Backend  (Python venv + bagtsuud)
-echo   - Frontend (npm install)
-echo   - Mobile   (Expo / npm install)
-echo   - Litsenz  (ashiglah hugatsaa tohiruulah)
+echo   - Backend  ^(Python venv^) ba Frontend ^(npm^) - ZEREGTSEE
+echo   - Veb interfeisiig beltgeh ^(build^)
+echo   - Litsenz  ^(ashiglah hugatsaa tohiruulah^)
 echo.
-echo Internet holbolt shaardlagatai. 5-15 minut urgeljilj magadgui.
+if /i "%~1"=="mobile" (
+    echo   + Mobile ^(Expo^) - songoson baina
+) else (
+    echo Mobile ^(Expo^) app suugahgui - ter ni zowhon gar utasnaas
+    echo holbogdohod heregtei. Heregtei bol:  install.bat mobile
+)
+echo.
+echo Internet holbolt shaardlagatai. 3-8 minut urgeljilj magadgui.
 echo.
 
 rem ========================================================
@@ -105,92 +111,103 @@ if exist "%TS_EXE%" (
 echo.
 
 rem ========================================================
-rem  2. BACKEND - Python venv + bagtsuud
+rem  2. BACKEND ba FRONTEND - ZEREGTSEE suulgana
 rem ========================================================
-echo [2/5] Backend suulgaj baina (Python)...
-cd /d "%ROOT%backend"
-
-if exist "venv" (
-    echo   - Huuchin venv-g ustgaj baina ^(shine PC deer ajillahgui^)...
-    rmdir /S /Q venv
-)
-rem  Ustgaj chadaagui bol ihenhdee program ajillaj baigaagiin shinj -
-rem  oilgomjgui aldaa ogohiin orond shaltgaanyg n helne.
-if exist "venv" (
-    echo.
-    echo   [X] Huuchin venv-g ustgaj chadsangui.
-    echo       Program ajillaj baival Stop.bat -g ajilluulj haagaad,
-    echo       backend/frontend tsonhnuudyg haagaad dahin oroldono uu.
-    echo.
-    pause
-    exit /b 1
-)
-echo   - Shine virtual environment uusgej baina...
-!PY! -m venv venv
-if !errorlevel! neq 0 (
-    echo   [X] venv uusgehed aldaa garlaa.
-    pause
-    exit /b 1
-)
-echo   - pip shinechilj baina...
-venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
-echo   - Python bagtsuudyg suulgaj baina ^(requirements.txt^)...
-venv\Scripts\python.exe -m pip install -r requirements.txt
-if !errorlevel! neq 0 (
-    echo   [X] Python bagts suulgahad aldaa garlaa.
-    pause
-    exit /b 1
-)
-rem -- .env beltgeh - JWT nuuts tulhuuriig sanamsargui uusgene --
-venv\Scripts\python.exe setup_env.py
-echo   [OK] Backend belen bolloo.
+rem  Hoyulaa setgeeneesee tatdag tul zeregtsee ajilluulahad
+rem  hugatsaa 2 dahin oirtson hemnegdene. Backend ard talaas
+rem  ajillaj, ur dungee %TEMP%\lpos_backend.done faild bichne.
+echo [2/4] Backend ba Frontend-g ZEREGTSEE suulgaj baina...
 echo.
 
-rem ========================================================
-rem  3. FRONTEND - npm install
-rem ========================================================
-echo [3/5] Frontend suulgaj baina (npm)...
+set "BK_DONE=%TEMP%\lpos_backend.done"
+set "BK_LOG=%TEMP%\lpos_backend.log"
+if exist "%BK_DONE%" del /Q "%BK_DONE%" >nul 2>&1
+
+echo   - Backend ard talaas ehellee ^(Python venv + bagtsuud^)...
+rem  cmd /c -g ZAAVAL zaana: start ni .bat-g shuud duudval /K ashiglaj
+rem  tsonhyg neelttei uldeej, ergen duudlaga hulzej bolno.
+start "Laundry - Backend suulgats" /min cmd /c ""%ROOT%tools\install_backend.bat" "%ROOT%backend" "!PY!""
+
+rem -- Frontend-g ene tsonhond suulgana --
+echo   - Frontend suulgaj baina ^(npm^)...
 cd /d "%ROOT%frontend"
-if exist "node_modules" (
-    echo   - Huuchin node_modules-g ustgaj baina...
-    rmdir /S /Q node_modules
+rem  npm ci ni node_modules-g OOROO tseverledeg tul garaar rmdir
+rem  hiihgui - 10 mynga fail ustgah ni udaan.
+if exist "package-lock.json" (
+    call npm ci --no-audit --no-fund
+) else (
+    if exist "node_modules" rmdir /S /Q node_modules
+    call npm install --no-audit --no-fund
 )
-if exist "node_modules" (
-    echo.
-    echo   [X] Huuchin node_modules-g ustgaj chadsangui.
-    echo       Stop.bat -g ajilluulj programyg haagaad dahin oroldono uu.
-    echo.
-    pause
-    exit /b 1
-)
-call npm install
 if !errorlevel! neq 0 (
     echo   [X] Frontend suulgahad aldaa garlaa.
     pause
     exit /b 1
 )
 echo   [OK] Frontend belen bolloo.
-echo.
 
-rem ========================================================
-rem  4. MOBILE - Expo / npm install
-rem ========================================================
-echo [4/5] Mobile app suulgaj baina (Expo)...
-cd /d "%ROOT%mobile"
-if exist "node_modules" (
-    echo   - Huuchin node_modules-g ustgaj baina...
-    rmdir /S /Q node_modules
-)
-if exist "node_modules" (
+rem -- Backend duusahyg huleene --
+echo   - Backend duusahyg huleej baina...
+rem  Hasaltai ( ) blok dotor "set /p X=<fail" ni utgaa avdaggui tul
+rem  shoshgot davtalt ashiglana.
+set "BK_RC="
+set /a BK_WAIT=0
+
+:wait_backend
+if exist "%BK_DONE%" goto :read_backend
+ping -n 2 127.0.0.1 >nul
+set /a BK_WAIT+=1
+if !BK_WAIT! lss 900 goto :wait_backend
+echo   [X] Backend suulgats 15 minutad duusaagui.
+echo       Delgerengui: %BK_LOG%
+pause
+exit /b 1
+
+:read_backend
+set /p BK_RC=<"%BK_DONE%"
+if not "!BK_RC!"=="0" (
     echo.
-    echo   [X] Huuchin node_modules-g ustgaj chadsangui.
-    echo       Stop.bat -g ajilluulj programyg haagaad dahin oroldono uu.
-    echo.
+    echo   [X] Backend suulgahad aldaa garlaa. Delgerengui:
+    echo   ------------------------------------------------
+    type "%BK_LOG%"
+    echo   ------------------------------------------------
     pause
     exit /b 1
 )
-if exist "package-lock.json" del /Q package-lock.json
-call npm install --legacy-peer-deps
+echo   [OK] Backend belen bolloo.
+echo.
+
+rem ========================================================
+rem  3. VEB INTERFEIS - build
+rem ========================================================
+rem  End bytsvel Run.bat ehnii udaa shuud asna.
+echo [3/4] Veb interfeisiig beltgej baina...
+cd /d "%ROOT%frontend"
+call npm run build
+if !errorlevel! neq 0 (
+    echo   [X] Veb interfeis bytsegdsengui.
+    pause
+    exit /b 1
+)
+echo   [OK] Veb interfeis belen.
+echo.
+
+rem ========================================================
+rem  MOBILE - zowhon "install.bat mobile" gej duudval
+rem ========================================================
+rem  Mobile app ni zowhon veb hesgiig gar utsand haruuldag boodol.
+rem  21 mynga fail suugah tul anhnaas ni suugahgui - hereg boloh
+rem  uyed  install.bat mobile  gej ajilluulna.
+if /i not "%~1"=="mobile" goto :skip_mobile
+
+echo [+] Mobile app suulgaj baina (Expo)...
+cd /d "%ROOT%mobile"
+if exist "package-lock.json" (
+    call npm ci --legacy-peer-deps --no-audit --no-fund
+) else (
+    if exist "node_modules" rmdir /S /Q node_modules
+    call npm install --legacy-peer-deps --no-audit --no-fund
+)
 if !errorlevel! neq 0 (
     echo   [X] Mobile suulgahad aldaa garlaa.
     pause
@@ -198,6 +215,7 @@ if !errorlevel! neq 0 (
 )
 echo   [OK] Mobile belen bolloo.
 echo.
+:skip_mobile
 
 rem  npm konsolyn codepage-g solij magadgui tul dahin batalgaajuulna
 chcp 65001 >nul
@@ -205,7 +223,7 @@ chcp 65001 >nul
 rem ========================================================
 rem  5. LITSENZ - ashiglah hugatsaa tohiruulah
 rem ========================================================
-echo [5/5] Litsenziin tohirgoo...
+echo [4/4] Litsenziin tohirgoo...
 echo.
 cd /d "%ROOT%backend"
 set "LICPY=venv\Scripts\python.exe"
@@ -239,11 +257,12 @@ echo ================================================
 echo   SUULGATS AMJILTTAI DUUSLAA!
 echo ================================================
 echo.
-echo  Programyg asaahdaa:  run.bat  -g 2 darj ajilluulna uu.
+echo  Programyg asaahdaa:  Run.bat  -g 2 darj ajilluulna uu.
 echo.
-echo  Backend:  http://localhost:8001
-echo  Frontend: http://localhost:5173
-echo  Expo:     run.bat dotor QR kod garch irne.
+echo  Program:  http://localhost:8001
+echo            ^(veb ba API neg hayagt - tusdaa server heregguii^)
+echo.
+echo  Gar utas:  install.bat mobile   daraa n:  Run.bat mobile
 echo.
 echo  Hugatsaa duusahad program ooroo tugjigdej, master nuuts ug
 echo  esvel idevhjuuleh tulhuur asuuh bolno.
