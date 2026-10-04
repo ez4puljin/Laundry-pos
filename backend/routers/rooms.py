@@ -3,7 +3,9 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 
-from database import SessionLocal
+# Салбар мэдэрдэг get_db — өмнө нь ЭХНИЙ салбарын сесс шууд нээдэг
+# байсан тул бусад салбарт Төв салбарын өгөгдөл харагдаж байв.
+from database import get_db
 from auth import get_current_user, require_admin
 import models
 import schemas
@@ -24,12 +26,6 @@ sessions_router = APIRouter(prefix="/room-sessions", tags=["rooms"])
 public_router   = APIRouter(prefix="/public",        tags=["rooms"])   # нэвтрэлтгүй
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 def _active_sessions(room_id: int, db: Session) -> List[models.RoomSession]:

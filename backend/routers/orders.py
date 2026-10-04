@@ -21,8 +21,9 @@ from models import (
 )
 from schemas import (
     OrderCreate, OrderItemCreate, OrderOut, OrderStatusUpdate, OrderPayRequest,
-    OrderFlagRequest, CouponValidate, CouponOut, CouponCreate
+    OrderFlagRequest, CouponValidate, CouponOut, CouponCreate, PaymentMethodChange
 )
+import ebarimt
 import settings_store
 import json
 from sms_service import send_ready_sms
@@ -175,6 +176,8 @@ def list_orders(
         joinedload(Order.items).joinedload(OrderItem.service),
         joinedload(Order.items).joinedload(OrderItem.product),
         joinedload(Order.sessions),      # түүх дээр оочирын № харуулна
+        joinedload(Order.cashier),       # захиалга авсан бүртгэл
+        joinedload(Order.paid_by_user),
     )
     q = _history_filters(q, status=status, kind=kind, payment_method=payment_method,
                          date_from=date_from, date_to=date_to)
@@ -453,6 +456,26 @@ def get_order(order_id: int, db: Session = Depends(get_db)):
     return o
 
 
+def _auto_ebarimt(order, db: Session) -> None:
+    """Төлбөр төлөгдмөгц И-Баримт гаргана (тохиргоогоор).
+
+    PosAPI унтарсан, сүлжээ тасарсан ч борлуулалт ҮРГЭЛЖИЛНЭ — үр дүн нь
+    order.ebarimt_status-д бичигдэж, Түүхээс «Дахин илгээх» боломжтой.
+    """
+    try:
+        conf = ebarimt.config(db)
+        if conf["enabled"] and conf["auto_send"]:
+            ebarimt.issue(order, db)
+    except Exception as e:                      # хамгаалалтын сүүлийн шугам
+        db.rollback()
+        try:
+            order.ebarimt_status = "error"
+            order.ebarimt_error = f"Дотоод алдаа: {e}"[:500]
+            db.commit()
+        except Exception:
+            db.rollback()
+
+
 def _require_open_shift(user, db: Session) -> None:
     """Кассчны идэвхтэй ээлж байгаа эсэхийг шалгана (админд хамаарахгүй)."""
     if getattr(user, "role", None) != "cashier":
@@ -610,7 +633,8 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db), current_us
         customer_id     = payload.customer_id,
         cashier_id      = current_user.id,
         phone           = payload.phone or None,
-        cashier_name    = payload.cashier_name,
+        # Нэрийг клиентийн илгээснээс биш НЭВТЭРСЭН бүртгэлээс авна
+        cashier_name    = current_user.full_name or payload.cashier_name,
         subtotal        = subtotal,
         discount_type   = payload.discount_type.value if payload.discount_type else None,
         discount_value  = payload.discount_value or 0.0,
@@ -625,7 +649,7 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db), current_us
         is_paid         = not is_unpaid,
         paid_at         = None if is_unpaid else _now_local(),
         paid_by_id      = None if is_unpaid else current_user.id,
-        paid_by         = None if is_unpaid else payload.cashier_name,
+        paid_by         = None if is_unpaid else (current_user.full_name or payload.cashier_name),
         notes           = payload.notes,
         status          = "delivered" if no_laundry_work else "pending",
         delivered_at    = _now_local() if no_laundry_work else None,
@@ -680,6 +704,10 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db), current_us
 
     db.commit()
     db.refresh(order)
+
+    # И-Баримт — урьдчилж төлсөн захиалгад шууд
+    if order.is_paid:
+        _auto_ebarimt(order, db)
 
     # eager load for response (sessions — тасалбар хэвлэхэд шаардлагатай)
     return db.query(Order).options(
@@ -870,10 +898,14 @@ def pay_order(
 
     db.commit()
 
+    # И-Баримт — дараа төлсөн захиалгад төлбөр авах үед
+    _auto_ebarimt(o, db)
+
     return db.query(Order).options(
         joinedload(Order.customer),
         joinedload(Order.items).joinedload(OrderItem.service),
-        joinedload(Order.items).joinedload(OrderItem.product)
+        joinedload(Order.items).joinedload(OrderItem.product),
+        joinedload(Order.sessions),
     ).filter(Order.id == order_id).first()
 
 
@@ -908,7 +940,117 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
     o.status = "deleted"
     o.deleted_at = _now_local()
     db.commit()
-    return {"ok": True}
+
+    # И-Баримтыг буцаана (Татварт бүртгэгдсэн борлуулалтыг хүчингүй болгоно)
+    eb = {}
+    try:
+        eb = ebarimt.cancel(o, db)
+    except Exception as e:
+        eb = {"error": str(e)}
+    return {"ok": True, "ebarimt": eb}
+
+
+# Админ засах боломжтой төлбөрийн хэлбэрүүд. Оноо/дараа төлөх нь харилцагчийн
+# оноо, өрийн бүртгэлд нөлөөлдөг тул энд солихгүй.
+_EDITABLE_METHODS = ("cash", "transfer", "card", "mixed")
+
+
+@router.patch("/{order_id}/payment-method", response_model=OrderOut)
+def change_payment_method(
+    order_id: int,
+    payload: PaymentMethodChange,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_admin),
+):
+    """Төлөгдсөн захиалгын төлбөрийн хэлбэрийг засах (касс буруу дарсан үед).
+
+    Дүн өөрчлөгдөхгүй — зөвхөн ямар хэлбэрээр төлсөн нь. Хэн, хэзээ, юунаас
+    юу болгосныг захиалга дээр тэмдэглэнэ. Ээлжийн тулгалт ба тайлан
+    захиалгаас шууд бодогддог тул автоматаар шинэчлэгдэнэ.
+    """
+    o = db.query(Order).filter(Order.id == order_id).first()
+    if not o:
+        raise HTTPException(status_code=404, detail="Захиалга олдсонгүй")
+    if o.status == "deleted":
+        raise HTTPException(status_code=400, detail="Устгагдсан захиалга")
+    if not o.is_paid:
+        raise HTTPException(status_code=400,
+                            detail="Төлөгдөөгүй захиалга — «Төлбөр авах»-аар төлүүлнэ үү")
+    if o.payment_method not in _EDITABLE_METHODS:
+        raise HTTPException(status_code=400,
+                            detail="Оноогоор төлсөн захиалгын хэлбэрийг солих боломжгүй")
+
+    method = payload.payment_method.value
+    if method not in _EDITABLE_METHODS:
+        raise HTTPException(status_code=400,
+                            detail="Бэлэн, шилжүүлэг, карт, холимог хэлбэрт л солино")
+
+    details = None
+    if method == "mixed":
+        try:
+            raw = json.loads(payload.payment_details or "{}")
+            parts = {k: float(v) for k, v in raw.items()
+                     if k in ("cash", "transfer", "card") and float(v) > 0}
+        except (ValueError, TypeError, AttributeError):
+            raise HTTPException(status_code=400, detail="Холимог төлбөрийн задаргаа буруу")
+        if len(parts) < 2:
+            raise HTTPException(status_code=400,
+                                detail="Холимог төлбөрт 2-оос дээш хэлбэр оруулна уу")
+        if abs(sum(parts.values()) - (o.total or 0)) >= 0.5:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Задаргааны нийлбэр {sum(parts.values()):,.0f}₮ нь "
+                       f"захиалгын дүн {o.total:,.0f}₮-тэй таарахгүй байна")
+        details = json.dumps(parts)
+
+    if method == o.payment_method and (details or None) == (o.payment_details or None):
+        raise HTTPException(status_code=400, detail="Өөрчлөлт алга")
+
+    o.payment_prev_method  = o.payment_method
+    o.payment_prev_details = o.payment_details
+    o.payment_method       = method
+    o.payment_details      = details
+    o.payment_edited_at    = _now_local()
+    o.payment_edited_by    = current_user.full_name
+    db.commit()
+
+    return db.query(Order).options(
+        joinedload(Order.customer),
+        joinedload(Order.items).joinedload(OrderItem.service),
+        joinedload(Order.items).joinedload(OrderItem.product),
+        joinedload(Order.sessions),
+        joinedload(Order.cashier),
+        joinedload(Order.paid_by_user),
+    ).filter(Order.id == order_id).first()
+
+
+@router.post("/{order_id}/ebarimt", response_model=OrderOut)
+def send_ebarimt(
+    order_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user),
+):
+    """И-Баримтыг гараар илгээх / алдаа гарсан бол дахин оролдох."""
+    o = db.query(Order).options(joinedload(Order.items)).filter(Order.id == order_id).first()
+    if not o:
+        raise HTTPException(status_code=404, detail="Захиалга олдсонгүй")
+    if o.status == "deleted":
+        raise HTTPException(status_code=400, detail="Устгагдсан захиалга")
+    if not o.is_paid:
+        raise HTTPException(status_code=400, detail="Төлбөр төлөгдөөгүй захиалгад баримт гаргахгүй")
+    if not ebarimt.config(db)["enabled"]:
+        raise HTTPException(status_code=400, detail="И-Баримт идэвхжүүлээгүй байна (Удирдлага → Тохиргоо)")
+    if o.ebarimt_status == "error":
+        o.ebarimt_status = None
+    res = ebarimt.issue(o, db)
+    if res.get("error"):
+        raise HTTPException(status_code=400, detail=res["error"])
+    return db.query(Order).options(
+        joinedload(Order.customer),
+        joinedload(Order.items).joinedload(OrderItem.service),
+        joinedload(Order.items).joinedload(OrderItem.product),
+        joinedload(Order.sessions),
+    ).filter(Order.id == order_id).first()
 
 
 @router.post("/archive-delivered")

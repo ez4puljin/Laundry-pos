@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { RefreshCw, Clock, ChevronRight, CheckCircle2, Package, Loader2, Play, Archive, CircleCheck, Banknote, X, Plus, Search, Wrench, AlertTriangle, ShowerHead } from 'lucide-react'
+import { RefreshCw, Clock, ChevronRight, CheckCircle2, Package, Loader2, Play, Archive, CircleCheck, Banknote, X, Plus, Search, Wrench, AlertTriangle, ShowerHead, Square } from 'lucide-react'
 import toast from 'react-hot-toast'
 import dayjs from 'dayjs'
 import { ordersApi, machinesApi, servicesApi, inventoryApi } from '../api/client'
@@ -149,6 +149,7 @@ export default function QueuePage() {
       const key = _ukey(m.current_usage.order_item_id, m.current_usage.sub_index)
       usageMap[key] = {
         status: 'running',
+        machineId: m.id,
         machineName: m.name,
         machineType: m.machine_type,
         startedAt: m.current_usage.started_at,
@@ -406,7 +407,7 @@ function OrderCard({ order, status, onUpdateStatus, usageMap, machines, onMachin
 
                 {/* Machine badge for running items */}
                 {usage?.status === 'running' && (
-                  <MachineProcessBadge info={usage} />
+                  <MachineProcessBadge info={usage} onFinished={onMachineAction} />
                 )}
 
                 {/* Completed machine badge */}
@@ -631,8 +632,9 @@ function AssignInlineButton({ item, subIndex = 0, order, machines, onAssign }) {
 
 
 /* ── Machine Process Badge ───────────────────────────── */
-function MachineProcessBadge({ info }) {
+function MachineProcessBadge({ info, onFinished }) {
   const [now, setNow] = useState(Date.now())
+  const [busy, setBusy] = useState(false)
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(id)
@@ -648,12 +650,38 @@ function MachineProcessBadge({ info }) {
   const secs = remainSec % 60
   const label = isOverdue ? 'Дууссан!' : `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
 
+  // Хугацаа дуусаагүй ч машиныг шууд дуусгана (үйлчлүүлэгч эрт авах г.м)
+  const finish = async (e) => {
+    e.stopPropagation()
+    if (!info.machineId) return
+    if (!isOverdue && !window.confirm(
+      `${info.machineName} — ${label} үлдсэн байна. Одоо дуусгах уу?`)) return
+    setBusy(true)
+    try {
+      await machinesApi.complete(info.machineId)
+      toast.success(`${info.machineName} дууслаа`)
+      onFinished?.()
+    } catch { /* interceptor */ } finally { setBusy(false) }
+  }
+
   return (
-    <div className={`ml-5 mt-0.5 flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full
-      ${isOverdue ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
-      <Loader2 className={`w-3 h-3 ${isOverdue ? '' : 'animate-spin'}`} />
-      <span className="font-medium">{info.machineName}</span>
-      <span className="font-mono">{label}</span>
+    <div className="ml-5 mt-0.5 flex items-center gap-1.5">
+      <div className={`flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full
+        ${isOverdue ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
+        <Loader2 className={`w-3 h-3 ${isOverdue ? '' : 'animate-spin'}`} />
+        <span className="font-medium">{info.machineName}</span>
+        <span className="font-mono">{label}</span>
+      </div>
+      {info.machineId && (
+        <button onClick={finish} disabled={busy}
+          title="Машиныг одоо дуусгах"
+          className={`flex items-center gap-0.5 text-[11px] font-semibold px-2 py-0.5 rounded-full
+                      transition-colors disabled:opacity-50
+            ${isOverdue ? 'bg-red-500 text-white hover:bg-red-600'
+                        : 'bg-white text-gray-600 border border-gray-300 hover:bg-gray-100'}`}>
+          <Square className="w-2.5 h-2.5" /> Дуусгах
+        </button>
+      )}
     </div>
   )
 }

@@ -144,7 +144,37 @@ class Order(Base):
     delivered_at    = Column(DateTime(timezone=True), nullable=True)
     deleted_at      = Column(DateTime(timezone=True), nullable=True)
 
+    # ── И-Баримт 3.0 ─────────────────────────────────────
+    # status: None (илгээгээгүй) | success | error | returned | none (НӨАТ-гүй)
+    ebarimt_status  = Column(String(20), nullable=True)
+    ebarimt_id      = Column(String(40), nullable=True)    # ДДТД (33 оронтой)
+    ebarimt_lottery = Column(String(30), nullable=True)    # сугалааны дугаар
+    ebarimt_qr      = Column(Text, nullable=True)          # QR кодын өгөгдөл
+    ebarimt_date    = Column(String(30), nullable=True)    # PosAPI-ийн огноо (буцаалтад)
+    ebarimt_amount  = Column(Float, nullable=True)         # баримтад орсон дүн
+    ebarimt_vat     = Column(Float, nullable=True)
+    ebarimt_test    = Column(Boolean, default=False)       # симулятор — хүчингүй
+    ebarimt_error   = Column(Text, nullable=True)
+
+    # ── Төлбөрийн хэлбэр засварласан тэмдэглэл (админ) ────
+    payment_edited_at    = Column(DateTime(timezone=True), nullable=True)
+    payment_edited_by    = Column(String(100), nullable=True)
+    payment_prev_method  = Column(String(20), nullable=True)
+    payment_prev_details = Column(Text, nullable=True)
+
     customer        = relationship("Customer", back_populates="orders")
+    # Захиалга авсан / төлбөр авсан БҮРТГЭЛ (нэр нь snapshot-оор cashier_name,
+    # paid_by-д хадгалагддаг; хэрэглэгчийн нэвтрэх нэрийг эндээс авна)
+    cashier         = relationship("User", foreign_keys=[cashier_id])
+    paid_by_user    = relationship("User", foreign_keys=[paid_by_id])
+
+    @property
+    def cashier_username(self):
+        return self.cashier.username if self.cashier else None
+
+    @property
+    def paid_by_username(self):
+        return self.paid_by_user.username if self.paid_by_user else None
     items           = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
     sessions        = relationship("RoomSession", back_populates="order")
 

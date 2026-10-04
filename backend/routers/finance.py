@@ -15,7 +15,9 @@ from sqlalchemy import func
 from datetime import datetime, timezone, timedelta, date
 from typing import Optional, List
 
-from database import SessionLocal
+# Салбар мэдэрдэг get_db — өмнө нь ЭХНИЙ салбарын сесс шууд нээдэг
+# байсан тул бусад салбарт Төв салбарын өгөгдөл харагдаж байв.
+from database import get_db
 from auth import get_current_user
 import models
 import schemas
@@ -27,12 +29,6 @@ def _now_local():
 router = APIRouter(prefix="/finance", tags=["finance"])
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 def _parse_date(s: Optional[str], default: Optional[datetime] = None) -> datetime:

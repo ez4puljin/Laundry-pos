@@ -67,6 +67,7 @@ const GROUPS = [
       { id: 'brand',   label: 'Байгууллагын нэр', icon: Building2 },
       { id: 'receipt', label: 'Баримт загвар', icon: Receipt },
       { id: 'sms',     label: 'SMS Gateway', icon: MessageSquare },
+      { id: 'ebarimt', label: 'И-Баримт 3.0', icon: Receipt, adminOnly: true },
       // Салбар ба бүх салбарын хэрэглэгч — ЗӨВХӨН админ
       { id: 'branches', label: 'Салбар', icon: Building2, adminOnly: true },
       { id: 'gusers',   label: 'Бүх салбарын хэрэглэгч', icon: UserCog,
@@ -176,6 +177,7 @@ export default function ManagePage() {
         {tab === 'brand'      && <BrandTab />}
         {tab === 'receipt'    && <ReceiptTab />}
         {tab === 'sms'        && <SmsTab />}
+        {tab === 'ebarimt'    && <EbarimtTab />}
         {tab === 'branches'   && <BranchesTab />}
         {tab === 'gusers'     && <GlobalUsersTab />}
         {tab === 'backup'     && <BackupTab />}
@@ -3137,3 +3139,231 @@ function BackupTab() {
 
 /* window.confirm-ийг нэрийн зөрчилгүйгээр дуудна */
 const confirm2 = (msg) => window.confirm(msg)
+
+
+// ══════════════════════════════════════════════════════════
+//  И-Баримт 3.0 (PosAPI) — салбар тус бүрд өөрийн ПОС бүртгэлтэй
+// ══════════════════════════════════════════════════════════
+const EB_EMPTY = {
+  enabled: false, mode: 'posapi', url: 'http://localhost:7080',
+  merchant_tin: '', pos_no: '', branch_no: '001', district_code: '',
+  code_service: '', code_shower: '', code_product: '',
+  city_tax: false, auto_send: true,
+}
+
+// Турших утгууд — ЗӨВХӨН симулятор горимд. Жинхэнэ ТТД, ПОС дугаар,
+// ангиллын кодыг PosAPI бүртгэл болон нягтлангаас авна.
+const EB_TEST = {
+  enabled: true, mode: 'simulator', url: 'http://localhost:7080',
+  merchant_tin: '00000000000', pos_no: 'TEST-001', branch_no: '001',
+  district_code: '0101',
+  code_service: '9711100', code_shower: '9723000', code_product: '3532100',
+  city_tax: false, auto_send: true,
+}
+
+function EbarimtTab() {
+  const [form, setForm]       = useState(EB_EMPTY)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy]       = useState(false)
+  const [check, setCheck]     = useState(null)    // холболт шалгасан үр дүн
+
+  useEffect(() => {
+    settingsApi.getEbarimt()
+      .then(r => setForm({ ...EB_EMPTY, ...r.data }))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  const save = async (data = form) => {
+    setBusy(true)
+    try {
+      const r = await settingsApi.updateEbarimt(data)
+      setForm({ ...EB_EMPTY, ...r.data })
+      toast.success('И-Баримтын тохиргоо хадгалагдлаа')
+      return true
+    } catch { return false } finally { setBusy(false) }
+  }
+
+  const testConn = async () => {
+    setBusy(true); setCheck(null)
+    try {
+      if (!(await save())) return
+      const { data } = await settingsApi.ebarimtInfo()
+      setCheck(data)
+      // PosAPI-ийн бүртгэлээс ТТД, ПОС дугаарыг автоматаар бөглөнө
+      if (data.ok && !data.info?.simulated) {
+        const m = data.info?.merchants?.[0]
+        const patch = {}
+        if (!form.merchant_tin && m?.tin) patch.merchant_tin = m.tin
+        if (!form.pos_no && data.info?.posNo) patch.pos_no = String(data.info.posNo)
+        if (Object.keys(patch).length) {
+          setForm(f => ({ ...f, ...patch }))
+          toast.success('PosAPI-ийн бүртгэлээс ТТД / ПОС дугаар бөглөгдлөө — хадгална уу')
+        }
+      }
+    } catch {} finally { setBusy(false) }
+  }
+
+  const sendData = async () => {
+    setBusy(true)
+    try {
+      const { data } = await settingsApi.ebarimtSendData()
+      data.ok ? toast.success('Хуримтлагдсан баримтыг илгээлээ')
+              : toast.error(data.message || 'Илгээж чадсангүй')
+    } catch {} finally { setBusy(false) }
+  }
+
+  const fillTest = () => {
+    setForm(EB_TEST)
+    setCheck(null)
+    toast('Турших утга бөглөгдлөө — «Хадгалах» дарна уу', { icon: '🧪' })
+  }
+
+  if (loading) return <div className="p-6 text-center text-gray-400">Уншиж байна...</div>
+
+  const input = (k, ph, extra = {}) => (
+    <input value={form[k] ?? ''} onChange={e => set(k, e.target.value)} placeholder={ph}
+           className="w-full border rounded-lg px-3 py-2 text-sm font-mono" {...extra} />
+  )
+  const sim = form.mode === 'simulator'
+
+  return (
+    <div className="p-4 sm:p-6 max-w-2xl mx-auto space-y-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h2 className="text-lg font-bold text-gray-800">И-Баримт 3.0 (PosAPI)</h2>
+          <p className="text-xs text-gray-400 mt-0.5 max-w-lg">
+            Төлбөр төлөгдмөгц НӨАТ-ын баримт гаргаж, QR, сугалаа, ДДТД-г баримт дээр
+            хэвлэнэ. Салбар бүр өөрийн ПОС бүртгэлтэй — энэ тохиргоо зөвхөн одоогийн
+            салбарт хамаарна.
+          </p>
+        </div>
+        <button onClick={fillTest}
+          className="text-xs font-semibold px-3 py-2 rounded-lg border border-amber-300
+                     bg-amber-50 text-amber-800 hover:bg-amber-100 shrink-0">
+          🧪 Турших утга бөглөх
+        </button>
+      </div>
+
+      <div className="bg-white rounded-xl border p-5 space-y-4">
+        {/* Идэвх + горим */}
+        <div className="flex items-center gap-6 flex-wrap">
+          <button onClick={() => set('enabled', !form.enabled)} className="flex items-center gap-2">
+            {form.enabled ? <ToggleRight className="w-8 h-8 text-green-600" />
+                          : <ToggleLeft  className="w-8 h-8 text-gray-400" />}
+            <span className={`text-sm font-semibold ${form.enabled ? 'text-green-700' : 'text-gray-400'}`}>
+              {form.enabled ? 'Идэвхтэй' : 'Идэвхгүй'}
+            </span>
+          </button>
+          <div className="flex rounded-lg border overflow-hidden text-sm">
+            {[['posapi', 'PosAPI (жинхэнэ)'], ['simulator', 'Симулятор (тест)']].map(([v, l]) => (
+              <button key={v} onClick={() => set('mode', v)}
+                className={`px-3 py-1.5 font-medium ${form.mode === v
+                  ? (v === 'simulator' ? 'bg-amber-500 text-white' : 'bg-blue-600 text-white')
+                  : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+                {l}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {sim ? (
+          <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800">
+            <b>Симулятор:</b> PosAPI-гүйгээр урсгалыг турших горим. Татварт ИЛГЭЭГДЭХГҮЙ —
+            баримт дээр «ТЕСТ — ХҮЧИНГҮЙ» гэж тод хэвлэгдэнэ. Жинхэнэ борлуулалтад
+            ашиглахгүй.
+          </div>
+        ) : (
+          <Field label="PosAPI хаяг">
+            {input('url', 'http://localhost:7080')}
+            <p className="text-[11px] text-gray-400 mt-1">
+              PosAPI нь баталгаажуулалтгүй — зөвхөн энэ компьютер эсвэл дотоод сүлжээнд
+              байлгана. Интернэтэд хэзээ ч нээж болохгүй.
+            </p>
+          </Field>
+        )}
+
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Field label="ТТД (merchantTin)">{input('merchant_tin', '11 эсвэл 14 оронтой')}</Field>
+          <Field label="ПОС дугаар (posNo)">{input('pos_no', 'PosAPI-ийн бүртгэлээс')}</Field>
+          <Field label="Салбарын дугаар (branchNo)">{input('branch_no', '001')}</Field>
+          <Field label="Байршлын код (districtCode)">{input('district_code', '4 оронтой')}</Field>
+        </div>
+
+        <div>
+          <p className="text-xs font-semibold text-gray-500 mb-1.5">
+            Бараа, үйлчилгээний ангиллын код (7 оронтой)
+          </p>
+          <div className="grid sm:grid-cols-3 gap-3">
+            <Field label="Угаалгын үйлчилгээ">{input('code_service', '0000000')}</Field>
+            <Field label="Шүршүүр">{input('code_shower', '0000000')}</Field>
+            <Field label="Бараа материал">{input('code_product', '0000000')}</Field>
+          </div>
+          <p className="text-[11px] text-gray-400 mt-1">
+            Татварын ангиллын жагсаалтаас нягтлантайгаа тулгаж оруулна уу.
+          </p>
+        </div>
+
+        <div className="flex gap-6 flex-wrap text-sm">
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={form.auto_send}
+                   onChange={e => set('auto_send', e.target.checked)} />
+            Төлбөр төлөгдмөгц автоматаар илгээх
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={form.city_tax}
+                   onChange={e => set('city_tax', e.target.checked)} />
+            НХАТ (2%) ногдоно
+          </label>
+        </div>
+
+        <div className="flex gap-2 flex-wrap pt-1">
+          <button onClick={() => save()} disabled={busy}
+            className="bg-blue-600 text-white text-sm font-semibold px-5 py-2.5 rounded-lg
+                       hover:bg-blue-700 disabled:opacity-60">
+            Хадгалах
+          </button>
+          <button onClick={testConn} disabled={busy}
+            className="text-sm font-semibold px-4 py-2.5 rounded-lg border hover:bg-gray-50
+                       disabled:opacity-60">
+            Холболт шалгах
+          </button>
+          {!sim && (
+            <button onClick={sendData} disabled={busy}
+              className="text-sm font-semibold px-4 py-2.5 rounded-lg border hover:bg-gray-50
+                         disabled:opacity-60">
+              Хуримтлагдсаныг илгээх
+            </button>
+          )}
+        </div>
+
+        {check && (
+          <div className={`rounded-lg border p-3 text-sm ${check.ok
+            ? 'bg-green-50 border-green-200 text-green-800'
+            : 'bg-red-50 border-red-200 text-red-700'}`}>
+            {check.ok ? (
+              <>
+                <div className="font-semibold">
+                  ✓ Холболт амжилттай{check.info?.simulated ? ' (симулятор)' : ''}
+                </div>
+                <div className="text-xs mt-1 space-y-0.5">
+                  {check.info?.operatorName && <div>Оператор: {check.info.operatorName}</div>}
+                  {check.info?.posNo && <div>ПОС: {check.info.posNo}</div>}
+                  {check.info?.leftLotteries != null && <div>Үлдсэн сугалаа: {check.info.leftLotteries}</div>}
+                  {check.info?.lastSendDate && <div>Сүүлд илгээсэн: {check.info.lastSendDate}</div>}
+                </div>
+              </>
+            ) : <div className="font-semibold">✕ {check.message}</div>}
+            {check.missing?.length > 0 && (
+              <div className="mt-2 text-xs text-red-700">
+                Дутуу: {check.missing.join(', ')}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

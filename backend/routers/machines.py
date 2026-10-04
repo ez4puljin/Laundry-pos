@@ -8,19 +8,15 @@ def _now_local():
     return datetime.now(_LOCAL_TZ)
 from typing import Optional, List
 
-from database import SessionLocal
+# Салбар мэдэрдэг get_db — өмнө нь ЭХНИЙ салбарын сесс шууд нээдэг
+# байсан тул бусад салбарт Төв салбарын өгөгдөл харагдаж байв.
+from database import get_db
 import models
 import schemas
 
 router = APIRouter(prefix="/machines", tags=["machines"])
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 def _machine_out(machine: models.Machine, db: Session) -> dict:

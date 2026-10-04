@@ -141,3 +141,70 @@ def update_receipt_settings(payload: ReceiptSettings, db: Session = Depends(get_
         "receipt_footer_sub":  payload.footer_sub,
     })
     return payload
+
+
+# ── И-Баримт 3.0 (PosAPI) ──────────────────────────────
+class EbarimtSettings(BaseModel):
+    enabled:       bool = False
+    mode:          str  = "posapi"          # posapi | simulator
+    url:           str  = "http://localhost:7080"
+    merchant_tin:  str  = ""
+    pos_no:        str  = ""
+    branch_no:     str  = "001"
+    district_code: str  = ""
+    code_service:  str  = ""
+    code_shower:   str  = ""
+    code_product:  str  = ""
+    city_tax:      bool = False
+    auto_send:     bool = True
+
+
+@router.get("/ebarimt", response_model=EbarimtSettings)
+def get_ebarimt_settings(db: Session = Depends(get_db)):
+    import ebarimt
+    c = ebarimt.config(db)
+    return EbarimtSettings(**c)
+
+
+@router.put("/ebarimt", response_model=EbarimtSettings, dependencies=[Depends(require_admin)])
+def update_ebarimt_settings(payload: EbarimtSettings, db: Session = Depends(get_db)):
+    if payload.mode not in ("posapi", "simulator"):
+        payload.mode = "posapi"
+    settings_store.set_many(db, {
+        "ebarimt_enabled":       str(payload.enabled).lower(),
+        "ebarimt_mode":          payload.mode,
+        "ebarimt_url":           payload.url.strip().rstrip("/"),
+        "ebarimt_merchant_tin":  payload.merchant_tin.strip(),
+        "ebarimt_pos_no":        payload.pos_no.strip(),
+        "ebarimt_branch_no":     payload.branch_no.strip() or "001",
+        "ebarimt_district_code": payload.district_code.strip(),
+        "ebarimt_code_service":  payload.code_service.strip(),
+        "ebarimt_code_shower":   payload.code_shower.strip(),
+        "ebarimt_code_product":  payload.code_product.strip(),
+        "ebarimt_city_tax":      str(payload.city_tax).lower(),
+        "ebarimt_auto_send":     str(payload.auto_send).lower(),
+    })
+    import ebarimt
+    return EbarimtSettings(**ebarimt.config(db))
+
+
+@router.get("/ebarimt/info", dependencies=[Depends(require_admin)])
+def ebarimt_info(db: Session = Depends(get_db)):
+    """Холболт шалгах — PosAPI-ийн /rest/info (бүртгэлтэй ТТД, ПОС дугаар)."""
+    import ebarimt
+    conf = ebarimt.config(db)
+    try:
+        data = ebarimt.info(conf)
+    except ebarimt.EbarimtError as e:
+        return {"ok": False, "message": str(e), "missing": ebarimt.validate(conf)}
+    return {"ok": True, "info": data, "missing": ebarimt.validate(conf)}
+
+
+@router.post("/ebarimt/send-data", dependencies=[Depends(require_admin)])
+def ebarimt_send_data(db: Session = Depends(get_db)):
+    """PosAPI дээр хуримтлагдсан баримтыг Татварын сервер рүү илгээх."""
+    import ebarimt
+    try:
+        return {"ok": True, "result": ebarimt.send_data(ebarimt.config(db))}
+    except ebarimt.EbarimtError as e:
+        return {"ok": False, "message": str(e)}

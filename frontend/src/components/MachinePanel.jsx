@@ -76,14 +76,14 @@ function MachineCard({ machine, onClickIdle, onComplete }) {
         </p>
       </div>
 
-      {/* Complete button */}
+      {/* Дуусгах — хугацаа дуусаагүй ч шууд зогсооно */}
       <button
-        onClick={() => onComplete(machine.id)}
+        onClick={() => onComplete(machine.id, !isOverdue)}
         className={`w-full flex items-center justify-center gap-1 text-xs font-semibold py-1.5 rounded-lg
           text-white transition-colors ${isOverdue ? 'bg-red-500 hover:bg-red-600' : 'bg-gray-500 hover:bg-gray-600'}`}
       >
         <Square className="w-3 h-3" />
-        {isOverdue ? 'Дууссан! Зогсоох' : 'Дууслаа'}
+        {isOverdue ? 'Дууссан! Зогсоох' : 'Одоо дуусгах'}
       </button>
     </div>
   )
@@ -245,9 +245,20 @@ function DailySummary({ show }) {
 
 
 /* ── Main MachinePanel ────────────────────────────────── */
+const TYPE_ORDER = { washer: 0, shoe_washer: 1, dryer: 2 }
+const FILTER_KEY = 'lpos-machine-filter'
+
 export default function MachinePanel({ machines, onAssign, onComplete }) {
   const [selectedMachine, setSelectedMachine] = useState(null)
   const [showSummary, setShowSummary] = useState(false)
+  // Машины төрлөөр шүүх — сонголтыг энэ компьютерт санана
+  const [typeFilter, setTypeFilter] = useState(() => {
+    try { return localStorage.getItem(FILTER_KEY) || '' } catch { return '' }
+  })
+  const pickType = (t) => {
+    setTypeFilter(t)
+    try { localStorage.setItem(FILTER_KEY, t) } catch { /* хувийн цонх */ }
+  }
 
   const handleAssign = async (machineId, data) => {
     try {
@@ -258,7 +269,8 @@ export default function MachinePanel({ machines, onAssign, onComplete }) {
     } catch {}
   }
 
-  const handleComplete = async (machineId) => {
+  const handleComplete = async (machineId, early = false) => {
+    if (early && !window.confirm('Хугацаа дуусаагүй байна. Машиныг одоо дуусгах уу?')) return
     try {
       await machinesApi.complete(machineId)
       toast.success('Машин чөлөөлөгдлөө')
@@ -267,6 +279,18 @@ export default function MachinePanel({ machines, onAssign, onComplete }) {
   }
 
   if (!machines || machines.length === 0) return null
+
+  // Байгаа төрлүүд л шүүлтүүрт гарна (ажиллаж буй/нийт тоотой)
+  const types = [...new Set(machines.map(m => m.machine_type))]
+    .sort((a, b) => (TYPE_ORDER[a] ?? 99) - (TYPE_ORDER[b] ?? 99))
+  const active = types.includes(typeFilter) ? typeFilter : ''
+  const shown = machines
+    .filter(m => !active || m.machine_type === active)
+    .sort((a, b) => {
+      const ao = TYPE_ORDER[a.machine_type] ?? 99
+      const bo = TYPE_ORDER[b.machine_type] ?? 99
+      return ao !== bo ? ao - bo : a.id - b.id
+    })
 
   return (
     <div className="px-4 pt-3">
@@ -289,15 +313,33 @@ export default function MachinePanel({ machines, onAssign, onComplete }) {
           </button>
         </div>
 
+        {/* Төрлөөр шүүх */}
+        {types.length > 1 && (
+          <div className="flex gap-1.5 flex-wrap mb-3">
+            {['', ...types].map(t => {
+              const list = t ? machines.filter(m => m.machine_type === t) : machines
+              const busy = list.filter(m => m.current_usage).length
+              const on = active === t
+              const badge = TYPE_COLORS[t]?.badge || 'bg-gray-100 text-gray-700'
+              return (
+                <button key={t || 'all'} onClick={() => pickType(t)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold
+                              border transition-all
+                    ${on ? `${badge} border-current shadow-sm`
+                         : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}>
+                  {t ? (TYPE_LABELS[t] || t) : 'Бүгд'}
+                  <span className={`text-[10px] px-1 rounded ${on ? 'bg-white/70' : 'bg-gray-100'}`}>
+                    {busy}/{list.length}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+
         {/* Machine cards — sorted: washer → shoe_washer → dryer → other */}
         <div className="flex gap-3 overflow-x-auto pb-1">
-          {[...machines].sort((a, b) => {
-            const order = { washer: 0, shoe_washer: 1, dryer: 2 }
-            const ao = order[a.machine_type] ?? 99
-            const bo = order[b.machine_type] ?? 99
-            if (ao !== bo) return ao - bo
-            return a.id - b.id
-          }).map(m => (
+          {shown.map(m => (
             <MachineCard
               key={m.id}
               machine={m}

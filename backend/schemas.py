@@ -190,6 +190,11 @@ class OrderPayRequest(BaseModel):
     payment_details: Optional[str] = None
     points_used:     int = 0
 
+class PaymentMethodChange(BaseModel):
+    """Админ: төлөгдсөн захиалгын төлбөрийн хэлбэрийг засах."""
+    payment_method:  PaymentMethod
+    payment_details: Optional[str] = None   # mixed үед JSON {"cash":..,"card":..}
+
 class OrderFlagRequest(BaseModel):
     """Анхааруулгын жагсаалтад нэмэх (төлбөр төлөлгүй явсан)"""
     reason: Optional[str] = None
@@ -241,6 +246,26 @@ class OrderOut(BaseModel):
     flagged_by:       Optional[str] = None
     items:            List[OrderItemOut]
     sessions:         List[OrderSessionBrief] = []   # шүршүүрийн тасалбарууд
+    # Захиалга авсан / төлбөр авсан бүртгэл
+    cashier_id:       Optional[int] = None
+    cashier_username: Optional[str] = None
+    paid_by_id:       Optional[int] = None
+    paid_by_username: Optional[str] = None
+    # Төлбөрийн хэлбэр засварласан тэмдэглэл
+    payment_edited_at:    Optional[datetime] = None
+    payment_edited_by:    Optional[str] = None
+    payment_prev_method:  Optional[str] = None
+    payment_prev_details: Optional[str] = None
+    # И-Баримт 3.0
+    ebarimt_status:   Optional[str] = None
+    ebarimt_id:       Optional[str] = None
+    ebarimt_lottery:  Optional[str] = None
+    ebarimt_qr:       Optional[str] = None
+    ebarimt_date:     Optional[str] = None
+    ebarimt_amount:   Optional[float] = None
+    ebarimt_vat:      Optional[float] = None
+    ebarimt_test:     Optional[bool] = False
+    ebarimt_error:    Optional[str] = None
 
     @field_serializer('created_at')
     def _ser_created_at(self, v): return _utc_iso(v)
@@ -253,6 +278,9 @@ class OrderOut(BaseModel):
 
     @field_serializer('paid_at')
     def _ser_paid_at(self, v): return _utc_iso(v)
+
+    @field_serializer('payment_edited_at')
+    def _ser_payment_edited_at(self, v): return _utc_iso(v)
 
     class Config:
         from_attributes = True

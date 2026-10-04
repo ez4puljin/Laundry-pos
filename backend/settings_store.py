@@ -35,6 +35,19 @@ DEFAULTS = {
     "sms_gateway_password": "",
     "sms_enabled":          "true",
     "sms_template":         "",
+    # И-Баримт 3.0 (PosAPI) — салбар бүр өөрийн ПОС бүртгэлтэй
+    "ebarimt_enabled":       "false",
+    "ebarimt_mode":          "posapi",            # posapi | simulator
+    "ebarimt_url":           "http://localhost:7080",
+    "ebarimt_merchant_tin":  "",                  # ТТД (11 эсвэл 14 оронтой)
+    "ebarimt_pos_no":        "",
+    "ebarimt_branch_no":     "001",
+    "ebarimt_district_code": "",                  # 4 оронтой байршлын код
+    "ebarimt_code_service":  "",                  # 7 оронтой ангиллын код
+    "ebarimt_code_shower":   "",
+    "ebarimt_code_product":  "",
+    "ebarimt_city_tax":      "false",             # НХАТ (2%) ногдох эсэх
+    "ebarimt_auto_send":     "true",              # төлбөр төлөгдмөгц илгээх
 }
 
 # .env-ийн нэр ↔ тохиргооны түлхүүр (анхны шилжүүлэлтэд)

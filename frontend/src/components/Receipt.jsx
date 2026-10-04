@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { X, Printer } from 'lucide-react'
 import dayjs from 'dayjs'
 import toast from 'react-hot-toast'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { QRCodeSVG } from 'qrcode.react'
 import useStore from '../store/useStore'
 import { settingsApi } from '../api/client'
 
@@ -45,6 +47,39 @@ function sumLines(items, productVat) {
     (s, i) => lineHasVat(i, productVat) ? s + i.total_price : s, 0)
   const vat = Math.round(base * VAT_RATE / (1 + VAT_RATE))
   return { sub, vat, total: sub }   // НӨАТ дүнд багтсан тул нэмэхгүй
+}
+
+/* ─── И-Баримт 3.0 ────────────────────────────────────────────────────────
+   Амжилттай гарсан баримтад QR, сугалаа, ДДТД хэвлэнэ. Шүршүүрийн
+   захиалгад QR нь БҮХ НӨАТ-тэй мөрийг (тасалбар + бараа) хамардаг тул
+   сүүлийн хуудас нь бүтэн баримт болно.                                  */
+const hasEbarimt = (o) => o?.ebarimt_status === 'success' && !!o.ebarimt_id
+
+function qrSvg(data, size = 170) {
+  return renderToStaticMarkup(
+    <QRCodeSVG value={data || ''} size={size} level="M" includeMargin={false} />
+  )
+}
+
+function ebarimtHtml(o, tin) {
+  if (!hasEbarimt(o)) return ''
+  const partial = o.ebarimt_amount != null && Math.abs(o.ebarimt_amount - o.total) >= 0.5
+  return `
+  <hr class="dash"/>
+  <div class="c">
+    ${o.ebarimt_test ? `<div class="xl" style="border:3px solid #000; padding:1mm; margin-bottom:2mm">
+      ТЕСТ — ХҮЧИНГҮЙ</div>` : ''}
+    <div class="b" style="letter-spacing:2px">И-БАРИМТ</div>
+    ${tin ? `<div class="sm">ТТД: ${tin}</div>` : ''}
+    <div style="margin:2mm auto; width:44mm">${qrSvg(o.ebarimt_qr)}</div>
+    <div class="sm">Сугалаа</div>
+    <div class="lg" style="letter-spacing:2px">${o.ebarimt_lottery || '—'}</div>
+    <div class="sm" style="margin-top:1mm">ДДТД</div>
+    <div class="sm" style="word-break:break-all">${o.ebarimt_id}</div>
+    ${partial ? `<div class="sm" style="margin-top:1mm">Баримтад орсон: ${Number(o.ebarimt_amount).toLocaleString()}₮
+      (үүнд НӨАТ ${Number(o.ebarimt_vat || 0).toLocaleString()}₮)</div>` : ''}
+    <div class="sm" style="margin-top:1mm">${o.ebarimt_date || ''}</div>
+  </div>`
 }
 
 /* ─── Хэвлэх бичиг баримтын нийтлэг хэв маяг ─────────────────────────── */
@@ -134,7 +169,7 @@ function ticketPage(s, o, rcpt) {
 }
 
 /* ─── receipt HTML string for print window ──────────────────────────────── */
-function buildPrintHtml(o, rcpt = DEFAULT_RECEIPT) {
+function buildPrintHtml(o, rcpt = DEFAULT_RECEIPT, tin = '') {
   const sessions  = o.sessions || []
   // Шүршүүрийн мөрүүд тасалбар болж хэвлэгдсэн тул баримтад давхардуулахгүй
   const goodsOnly = (o.items || []).filter(i => i.item_type !== 'room')
@@ -142,10 +177,13 @@ function buildPrintHtml(o, rcpt = DEFAULT_RECEIPT) {
   const pages = sessions.length
     ? [
         ...sessions.map(s => ticketPage(s, o, rcpt)),
-        // Бараа авсан үед л нэмэлт баримт хэвлэнэ
-        ...(goodsOnly.length ? [receiptPage(o, rcpt, goodsOnly, true)] : []),
+        // И-Баримттай бол QR нь бүх мөрийг хамардаг тул БҮТЭН баримт,
+        // эс бөгөөс бараа авсан үед л нэмэлт баримт хэвлэнэ
+        ...(hasEbarimt(o)
+            ? [receiptPage(o, rcpt, o.items || [], false, tin)]
+            : goodsOnly.length ? [receiptPage(o, rcpt, goodsOnly, true)] : []),
       ]
-    : [receiptPage(o, rcpt, o.items || [], false)]
+    : [receiptPage(o, rcpt, o.items || [], false, tin)]
 
   return `<!DOCTYPE html>
 <html>
@@ -163,7 +201,7 @@ ${pages.join('\n')}
 /* ─── Бараа / үйлчилгээний баримт ────────────────────────────────────────
    goodsOnly=true үед зөвхөн жагсаасан мөрүүдийн дүнг харуулна
    (шүршүүрийн тасалбарууд тусад нь хэвлэгдсэн).                         */
-function receiptPage(o, rcpt, items, goodsOnly) {
+function receiptPage(o, rcpt, items, goodsOnly, tin = '') {
   const date = dayjs(o.created_at).format('YYYY/MM/DD  HH:mm')
   const g = sumLines(items, o.product_vat)
   const subtotal = goodsOnly ? g.sub   : o.subtotal
@@ -313,6 +351,8 @@ function receiptPage(o, rcpt, items, goodsOnly) {
   </table>
   ` : ''}
 
+  ${goodsOnly ? '' : ebarimtHtml(o, tin)}
+
   <hr class="dash"/>
 
   <!-- STATUS + FOOTER -->
@@ -330,9 +370,11 @@ function receiptPage(o, rcpt, items, goodsOnly) {
 export default function Receipt() {
   const { lastOrder, showReceiptModal, closeReceipt } = useStore()
   const [rcpt, setRcpt] = useState(DEFAULT_RECEIPT)
+  const [tin, setTin]   = useState('')
 
   useEffect(() => {
     settingsApi.getReceipt().then(r => setRcpt(r.data)).catch(() => {})
+    settingsApi.getEbarimt().then(r => setTin(r.data.merchant_tin || '')).catch(() => {})
   }, [showReceiptModal])
 
   if (!showReceiptModal || !lastOrder) return null
@@ -340,7 +382,9 @@ export default function Receipt() {
   const o = lastOrder
   // Шүршүүрийн захиалга: хүн бүрд тасалбар + (бараатай бол) нэмэлт баримт
   const sessions  = o.sessions || []
-  const goodsOnly = sessions.length > 0
+  const eb        = hasEbarimt(o)
+  // И-Баримттай шүршүүрийн захиалга → сүүлийн хуудас бүтэн баримт
+  const goodsOnly = sessions.length > 0 && !eb
   const items     = goodsOnly
     ? (o.items || []).filter(i => i.item_type !== 'room')
     : (o.items || [])
@@ -349,6 +393,7 @@ export default function Receipt() {
   const vat      = goodsOnly ? g.vat   : (o.vat_amount || 0)
   const total    = goodsOnly ? g.total : o.total
   const pageCount = sessions.length + (goodsOnly ? (items.length ? 1 : 0) : 1)
+  const ebFailed  = o.ebarimt_status === 'error'
 
   const handlePrint = () => {
     // Бүх хуудсыг НЭГ цонхонд бэлдэнэ — тасалбар бүр page-break-ээр
@@ -359,7 +404,7 @@ export default function Receipt() {
                   { id: 'print-blocked' })
       return
     }
-    w.document.write(buildPrintHtml(o, rcpt))
+    w.document.write(buildPrintHtml(o, rcpt, tin))
     w.document.close()
     setTimeout(() => { w.focus(); w.print() }, 400)
   }
@@ -580,6 +625,16 @@ export default function Receipt() {
               </>
             )}
 
+            {/* ── И-Баримт ── */}
+            {!goodsOnly && eb && <EbarimtBlock o={o} tin={tin} />}
+            {!goodsOnly && ebFailed && (
+              <div className="my-2 rounded-lg border border-red-300 bg-red-50 p-2 text-[11px] text-red-700"
+                   style={{ fontFamily: 'sans-serif', fontWeight: 400 }}>
+                <b>И-Баримт гараагүй:</b> {o.ebarimt_error}
+                <div className="mt-0.5 text-red-500">Түүх хуудаснаас «Дахин илгээх» боломжтой.</div>
+              </div>
+            )}
+
             <Dash />
 
             {/* ── Status + footer ── */}
@@ -600,6 +655,41 @@ export default function Receipt() {
 
       </div>
     </div>
+  )
+}
+
+/* ── И-Баримтын хэсэг (урьдчилан харах) ────────────────────────────────── */
+function EbarimtBlock({ o, tin }) {
+  const partial = o.ebarimt_amount != null && Math.abs(o.ebarimt_amount - o.total) >= 0.5
+  return (
+    <>
+      <Dash />
+      <div className="text-center" style={{ fontSize: '12px' }}>
+        {o.ebarimt_test && (
+          <div className="font-black border-2 border-black my-1 py-0.5 tracking-wider"
+               style={{ fontSize: '14px' }}>
+            ТЕСТ — ХҮЧИНГҮЙ
+          </div>
+        )}
+        <div className="font-black tracking-widest">И-БАРИМТ</div>
+        {tin && <div>ТТД: {tin}</div>}
+        <div className="flex justify-center my-2">
+          <QRCodeSVG value={o.ebarimt_qr || ''} size={150} level="M" />
+        </div>
+        <div>Сугалаа</div>
+        <div className="font-black tracking-widest" style={{ fontSize: '15px' }}>
+          {o.ebarimt_lottery || '—'}
+        </div>
+        <div className="mt-1">ДДТД</div>
+        <div className="break-all" style={{ fontSize: '10px' }}>{o.ebarimt_id}</div>
+        {partial && (
+          <div className="mt-1" style={{ fontSize: '11px' }}>
+            Баримтад орсон: {Number(o.ebarimt_amount).toLocaleString()}₮
+            (үүнд НӨАТ {Number(o.ebarimt_vat || 0).toLocaleString()}₮)
+          </div>
+        )}
+      </div>
+    </>
   )
 }
 

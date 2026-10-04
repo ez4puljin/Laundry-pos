@@ -256,6 +256,41 @@ def _migrate(engine=engine):
             """))
             conn.commit()
 
+    # orders.ebarimt_* — И-Баримт 3.0-ийн үр дүн
+    ord_cols_eb = [c["name"] for c in inspect(engine).get_columns("orders")]
+    eb_cols = {
+        "ebarimt_status":  "VARCHAR(20)",
+        "ebarimt_id":      "VARCHAR(40)",
+        "ebarimt_lottery": "VARCHAR(30)",
+        "ebarimt_qr":      "TEXT",
+        "ebarimt_date":    "VARCHAR(30)",
+        "ebarimt_amount":  "REAL",
+        "ebarimt_vat":     "REAL",
+        "ebarimt_test":    "BOOLEAN DEFAULT 0",
+        "ebarimt_error":   "TEXT",
+    }
+    missing_eb = [(k, v) for k, v in eb_cols.items() if k not in ord_cols_eb]
+    if missing_eb:
+        with engine.connect() as conn:
+            for k, v in missing_eb:
+                conn.execute(text(f"ALTER TABLE orders ADD COLUMN {k} {v}"))
+            conn.commit()
+
+    # orders.payment_* — админ төлбөрийн хэлбэр засварласан тэмдэглэл
+    ord_cols_pe = [c["name"] for c in inspect(engine).get_columns("orders")]
+    pe_cols = {
+        "payment_edited_at":    "DATETIME",
+        "payment_edited_by":    "VARCHAR(100)",
+        "payment_prev_method":  "VARCHAR(20)",
+        "payment_prev_details": "TEXT",
+    }
+    missing_pe = [(k, v) for k, v in pe_cols.items() if k not in ord_cols_pe]
+    if missing_pe:
+        with engine.connect() as conn:
+            for k, v in missing_pe:
+                conn.execute(text(f"ALTER TABLE orders ADD COLUMN {k} {v}"))
+            conn.commit()
+
     # users.is_global — глобал хэрэглэгч (админ/нягтлан) бүх салбарт хүчинтэй
     usr_cols = [c["name"] for c in inspect(engine).get_columns("users")]
     if "is_global" not in usr_cols:

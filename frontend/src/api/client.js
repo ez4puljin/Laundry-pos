@@ -97,6 +97,9 @@ export const customersApi = {
 export const ordersApi = {
   list:           (params = {}) => api.get('/orders/', { params }),
   summary:        (params = {}) => api.get('/orders/summary', { params }),
+  sendEbarimt:    (id)          => api.post(`/orders/${id}/ebarimt`, null, { timeout: 30000 }),
+  // Админ — төлөгдсөн захиалгын төлбөрийн хэлбэрийг засах
+  changePayment:  (id, data)    => api.patch(`/orders/${id}/payment-method`, data),
   queue:          ()            => api.get('/orders/queue'),
   get:            (id)          => api.get(`/orders/${id}`),
   create:         (data)        => api.post('/orders/', data),
@@ -244,6 +247,11 @@ export const settingsApi = {
   getPoints:    ()     => api.get('/settings/points'),
   updatePoints: (data) => api.put('/settings/points', data),
   getReceipt:    ()     => api.get('/settings/receipt'),
+  // И-Баримт 3.0 (PosAPI)
+  getEbarimt:      ()     => api.get('/settings/ebarimt'),
+  updateEbarimt:   (data) => api.put('/settings/ebarimt', data),
+  ebarimtInfo:     ()     => api.get('/settings/ebarimt/info', { timeout: 30000 }),
+  ebarimtSendData: ()     => api.post('/settings/ebarimt/send-data', null, { timeout: 60000 }),
   updateReceipt: (data) => api.put('/settings/receipt', data),
 }
 

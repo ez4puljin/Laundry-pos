@@ -2,12 +2,15 @@ import { useState, useEffect } from 'react'
 import {
   ClipboardList, Calendar, ChevronDown, ChevronUp,
   Banknote, Smartphone, ArrowLeftRight, Gift, Layers,
-  Package, User, RefreshCw, Search, Trash2, MessageSquare, Save, AlertTriangle, HandCoins
+  Package, User, RefreshCw, Search, Trash2, MessageSquare, Save, AlertTriangle, HandCoins,
+  Printer, Send, Pencil, UserCheck
 } from 'lucide-react'
 import dayjs from 'dayjs'
 import toast from 'react-hot-toast'
 import { ordersApi, machinesApi } from '../api/client'
 import useAuthStore from '../store/useAuthStore'
+import useStore from '../store/useStore'
+import Receipt from '../components/Receipt'
 
 // Кассчин зөвхөн эхний 2 шүүлтүүрийг (өнөөдөр / өчигдөр) ашиглана — backend дээр мөн хязгаарлагдсан
 const QUICK_FILTERS = [
@@ -387,6 +390,10 @@ export default function HistoryPage() {
                 onToggle={() => toggleExpand(order.id)}
                 usages={usagesMap[order.id] || []}
                 isAdmin={isAdmin}
+                // Мөрийн шинэ төлөвийг (жишээ нь И-Баримт гарсны дараа) жагсаалтад тусгана
+                onUpdateOrder={(o) => {
+                  if (o?.id) setOrders(prev => prev.map(x => x.id === o.id ? { ...x, ...o } : x))
+                }}
                 onDelete={async (id) => {
                   if (!confirm('Энэ захиалгыг устгах уу?')) return
                   try {
@@ -397,6 +404,8 @@ export default function HistoryPage() {
                 }}
               />
             ))}
+
+            <Receipt />
 
             {/* ── Хуудаслалт ── */}
             {hasMore ? (
@@ -478,6 +487,8 @@ function LatePaymentRow({ order }) {
 
 // ── Order row ────────────────────────────────────────────
 function OrderRow({ order, expanded, onToggle, usages, isAdmin, onDelete, onUpdateOrder }) {
+  const setLastOrder = useStore(s => s.setLastOrder)
+  const [sendingEb, setSendingEb] = useState(false)
   const [noteText, setNoteText] = useState(order.notes || '')
   const [editingNote, setEditingNote] = useState(false)
   const [savingNote, setSavingNote] = useState(false)
@@ -590,6 +601,7 @@ function OrderRow({ order, expanded, onToggle, usages, isAdmin, onDelete, onUpda
               : <span className="text-gray-400 italic">Харилцагчгүй</span>
             }
           </p>
+          <EbarimtBadge order={order} />
           <span className={`shrink-0 flex items-center gap-1 text-xs font-semibold
                             px-2 py-0.5 rounded-full ${info.color}`}>
             <PayIcon className="w-3 h-3" />
@@ -614,6 +626,17 @@ function OrderRow({ order, expanded, onToggle, usages, isAdmin, onDelete, onUpda
           </div>
         )}
 
+        {/* Захиалга авсан бүртгэл */}
+        <p className="mt-0.5 text-[11px] text-gray-500 truncate flex items-center gap-1">
+          <UserCheck className="w-3 h-3 text-gray-400 shrink-0" />
+          <AccountLabel name={order.cashier_name} username={order.cashier_username} />
+          {order.paid_by && order.paid_by_id && order.paid_by_id !== order.cashier_id && (
+            <span className="text-gray-400">
+              · төлбөр авсан: <AccountLabel name={order.paid_by} username={order.paid_by_username} />
+            </span>
+          )}
+        </p>
+
         {/* Row 3: items preview + note indicator */}
         <div className="flex items-center gap-1.5 mt-0.5">
           {preview && (
@@ -635,7 +658,21 @@ function OrderRow({ order, expanded, onToggle, usages, isAdmin, onDelete, onUpda
           {/* Meta info row */}
           <div className="px-4 py-2 flex items-center gap-4 text-xs text-gray-500 border-b border-gray-100 flex-wrap">
             <span>📅 {dayjs(order.created_at).format('YYYY/MM/DD HH:mm')}</span>
-            <span>👷 {order.cashier_name}</span>
+            <span className="flex items-center gap-1">
+              <UserCheck className="w-3.5 h-3.5" /> Захиалга авсан:
+              <b className="text-gray-700 font-semibold">
+                <AccountLabel name={order.cashier_name} username={order.cashier_username} />
+              </b>
+            </span>
+            {order.paid_by && (
+              <span>
+                💰 Төлбөр авсан:{' '}
+                <b className="text-gray-700 font-semibold">
+                  <AccountLabel name={order.paid_by} username={order.paid_by_username} />
+                </b>
+                {order.paid_at && <> · {dayjs(order.paid_at).format('MM/DD HH:mm')}</>}
+              </span>
+            )}
             {order.customer?.phone && <span>📱 {order.customer.phone}</span>}
             {order.notes && <span className="text-blue-600">📝 {order.notes}</span>}
           </div>
@@ -780,6 +817,62 @@ function OrderRow({ order, expanded, onToggle, usages, isAdmin, onDelete, onUpda
             )}
           </div>
 
+          {/* Төлбөрийн хэлбэр засварласан тэмдэглэл */}
+          {order.payment_edited_at && (
+            <div className="px-4 pt-2 text-[11px] text-amber-700">
+              ✏️ Төлбөрийн хэлбэр засварласан:{' '}
+              <b>{payLabel(order.payment_prev_method, order.payment_prev_details)}</b>
+              {' → '}
+              <b>{payLabel(order.payment_method, order.payment_details)}</b>
+              {' · '}{order.payment_edited_by}
+              {' · '}{dayjs(order.payment_edited_at).format('MM/DD HH:mm')}
+            </div>
+          )}
+
+          {/* Админ: төлбөрийн хэлбэр засах */}
+          {isAdmin && !isDeleted && order.is_paid && EDITABLE_PAY.includes(order.payment_method) && (
+            <PaymentEditor order={order} onSaved={(o) => onUpdateOrder?.(o)} />
+          )}
+
+          {/* И-Баримт + дахин хэвлэх */}
+          {!isDeleted && (
+            <div className="px-4 pb-2 flex flex-wrap items-center gap-2">
+              <button
+                onClick={(e) => { e.stopPropagation(); setLastOrder(order) }}
+                className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-gray-800
+                           bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-lg transition-colors"
+              >
+                <Printer className="w-3.5 h-3.5" /> Баримт хэвлэх
+              </button>
+              {order.is_paid && order.ebarimt_status !== 'success' && order.ebarimt_status !== 'none' && (
+                <button
+                  disabled={sendingEb}
+                  onClick={async (e) => {
+                    e.stopPropagation()
+                    setSendingEb(true)
+                    try {
+                      const { data } = await ordersApi.sendEbarimt(order.id)
+                      onUpdateOrder?.(data)
+                      toast.success('И-Баримт гарлаа')
+                    } catch { /* interceptor */ } finally { setSendingEb(false) }
+                  }}
+                  className="flex items-center gap-1.5 text-xs text-blue-700 hover:text-blue-900
+                             bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors
+                             disabled:opacity-60"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  {order.ebarimt_status === 'error' ? 'И-Баримт дахин илгээх' : 'И-Баримт гаргах'}
+                </button>
+              )}
+              {order.ebarimt_status === 'error' && (
+                <span className="text-[11px] text-red-600 flex-1 min-w-0 truncate"
+                      title={order.ebarimt_error || ''}>
+                  {order.ebarimt_error}
+                </span>
+              )}
+            </div>
+          )}
+
           {/* Admin delete button */}
           {isAdmin && !isDeleted && (
             <div className="px-4 pb-3 flex justify-end">
@@ -807,6 +900,173 @@ function TotalRow({ label, value, bold, green, amber }) {
       ${bold ? 'font-bold text-gray-800' : green ? 'text-emerald-600' : amber ? 'text-amber-600' : 'text-gray-500'}`}>
       <span>{label}</span>
       <span>{value}</span>
+    </div>
+  )
+}
+
+
+/* И-Баримтын төлөвийн жижиг тэмдэг */
+function EbarimtBadge({ order }) {
+  const st = order.ebarimt_status
+  if (!st || st === 'none') return null
+  const map = {
+    success:  order.ebarimt_test
+      ? ['И-Баримт ТЕСТ', 'bg-amber-100 text-amber-700']
+      : ['И-Баримт', 'bg-emerald-100 text-emerald-700'],
+    error:    ['И-Баримт алдаа', 'bg-red-100 text-red-700'],
+    returned: ['И-Баримт буцаасан', 'bg-gray-100 text-gray-500'],
+  }
+  const [label, cls] = map[st] || [st, 'bg-gray-100 text-gray-500']
+  return (
+    <span className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${cls}`}
+          title={order.ebarimt_error || order.ebarimt_id || ''}>
+      {label}
+    </span>
+  )
+}
+
+
+
+/* ── Бүртгэлийн нэр: «Нэр (@нэвтрэх_нэр)» ───────────────── */
+function AccountLabel({ name, username }) {
+  if (!name && !username) return <span className="text-gray-400">—</span>
+  return (
+    <>
+      {name || username}
+      {username && <span className="text-gray-400 font-normal"> @{username}</span>}
+    </>
+  )
+}
+
+
+/* ── Төлбөрийн хэлбэр засах (админ) ─────────────────────── */
+const EDITABLE_PAY = ['cash', 'transfer', 'card', 'mixed']
+const PAY_PARTS = [
+  { key: 'cash',     label: 'Бэлэн'     },
+  { key: 'transfer', label: 'Шилжүүлэг' },
+  { key: 'card',     label: 'Карт'      },
+]
+
+function payLabel(method, details) {
+  const base = PAYMENT_INFO[method]?.label || method || '—'
+  if (method !== 'mixed' || !details) return base
+  try {
+    const d = JSON.parse(details)
+    return base + ' (' + Object.entries(d)
+      .filter(([, v]) => Number(v) > 0)
+      .map(([k, v]) => `${PAYMENT_INFO[k]?.label || k} ${Number(v).toLocaleString()}₮`)
+      .join(', ') + ')'
+  } catch { return base }
+}
+
+function PaymentEditor({ order, onSaved }) {
+  const [open, setOpen]     = useState(false)
+  const [method, setMethod] = useState(order.payment_method)
+  const [parts, setParts]   = useState({ cash: '', transfer: '', card: '' })
+  const [saving, setSaving] = useState(false)
+
+  const begin = (e) => {
+    e.stopPropagation()
+    setMethod(order.payment_method)
+    let init = { cash: '', transfer: '', card: '' }
+    if (order.payment_method === 'mixed' && order.payment_details) {
+      try {
+        const d = JSON.parse(order.payment_details)
+        init = { cash: d.cash || '', transfer: d.transfer || '', card: d.card || '' }
+      } catch { /* хоосон */ }
+    }
+    setParts(init)
+    setOpen(true)
+  }
+
+  const mixedSum = PAY_PARTS.reduce((s, p) => s + (Number(parts[p.key]) || 0), 0)
+  const mixedOk  = method !== 'mixed' || (
+    PAY_PARTS.filter(p => Number(parts[p.key]) > 0).length >= 2 &&
+    Math.abs(mixedSum - order.total) < 0.5)
+
+  const save = async (e) => {
+    e.stopPropagation()
+    if (!mixedOk) return
+    setSaving(true)
+    try {
+      const body = { payment_method: method }
+      if (method === 'mixed') {
+        body.payment_details = JSON.stringify(Object.fromEntries(
+          PAY_PARTS.filter(p => Number(parts[p.key]) > 0)
+                   .map(p => [p.key, Number(parts[p.key])])))
+      }
+      const { data } = await ordersApi.changePayment(order.id, body)
+      toast.success(`Төлбөрийн хэлбэр: ${payLabel(data.payment_method, data.payment_details)}`)
+      onSaved?.(data)
+      setOpen(false)
+    } catch { /* interceptor */ } finally { setSaving(false) }
+  }
+
+  if (!open) {
+    return (
+      <div className="px-4 pt-2">
+        <button onClick={begin}
+          className="flex items-center gap-1.5 text-xs text-amber-700 hover:text-amber-900
+                     bg-amber-50 hover:bg-amber-100 border border-amber-200
+                     px-3 py-1.5 rounded-lg transition-colors">
+          <Pencil className="w-3.5 h-3.5" /> Төлбөрийн хэлбэр засах
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mx-4 mt-2 rounded-xl border border-amber-200 bg-amber-50/60 p-3 space-y-2.5"
+         onClick={e => e.stopPropagation()}>
+      <div className="text-xs font-semibold text-amber-800">
+        Төлбөрийн хэлбэр засах · дүн {order.total.toLocaleString()}₮ хэвээр
+      </div>
+      <div className="flex gap-1.5 flex-wrap">
+        {EDITABLE_PAY.map(m => (
+          <button key={m} onClick={() => setMethod(m)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors
+              ${method === m
+                ? 'bg-amber-500 text-white border-amber-500'
+                : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+            {PAYMENT_INFO[m]?.label || m}
+          </button>
+        ))}
+      </div>
+
+      {method === 'mixed' && (
+        <div className="grid grid-cols-3 gap-2">
+          {PAY_PARTS.map(p => (
+            <label key={p.key} className="text-[11px] text-gray-500">
+              {p.label}
+              <input type="number" min="0" value={parts[p.key]}
+                onChange={e => setParts(v => ({ ...v, [p.key]: e.target.value }))}
+                className="mt-0.5 w-full border border-gray-200 rounded-lg px-2 py-1 text-sm bg-white" />
+            </label>
+          ))}
+          <div className={`col-span-3 text-[11px] ${mixedOk ? 'text-green-700' : 'text-red-600'}`}>
+            Нийлбэр {mixedSum.toLocaleString()}₮ / {order.total.toLocaleString()}₮
+            {!mixedOk && ' — 2-оос дээш хэлбэрээр, дүнтэй тэнцүү байх ёстой'}
+          </div>
+        </div>
+      )}
+
+      <p className="text-[11px] text-amber-700/80">
+        Ээлжийн тулгалт, тайлан шинэ хэлбэрээр дахин бодогдоно.
+        {order.ebarimt_status === 'success' && ' Гарсан И-Баримт дээрх төлбөрийн хэлбэр өөрчлөгдөхгүй.'}
+      </p>
+
+      <div className="flex gap-2">
+        <button onClick={(e) => { e.stopPropagation(); setOpen(false) }}
+          className="flex-1 border border-gray-300 rounded-lg py-1.5 text-xs font-medium
+                     text-gray-600 hover:bg-white">
+          Болих
+        </button>
+        <button onClick={save} disabled={saving || !mixedOk || method === order.payment_method && method !== 'mixed'}
+          className="flex-1 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white
+                     rounded-lg py-1.5 text-xs font-bold">
+          {saving ? 'Хадгалж байна…' : 'Хадгалах'}
+        </button>
+      </div>
     </div>
   )
 }
